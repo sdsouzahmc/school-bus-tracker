@@ -287,9 +287,34 @@ if not is_driver:
             submit(kind, sid=sid, method="MANUAL", extra={"manual_reason": why, "verified_by": ver})
             st.rerun()
 
+cur_stop = st.session_state.get(f"{K}_stop", SCHOOL_STOP)
+_arrive = [ln for ln in lines if ln["status"] == "ONBOARD" and ln["purpose"] == "PICKUP"]
+if not is_driver and _arrive and cur_stop == SCHOOL_STOP:
+    with st.container(border=True):
+        st.markdown(f"**🏫 Arrived at school — hand over {len(_arrive)} pickup child(ren) to receiving staff**")
+        st.caption("Records a separate school check-out for every child, with the receiving staff member's name. "
+                   "Children still on a drop-off route are not affected.")
+        c1, c2 = st.columns([2, 1])
+        _rcv = [r["name"] for r in db.q("SELECT name FROM staff WHERE role='receiving' ORDER BY name")]
+        _who = c1.selectbox(t("Received by (school staff)"), _rcv, key=f"{K}_bulkrcv")
+        if c2.button(f"✅ Hand over all {len(_arrive)}", type="primary", key=f"{K}_bulkgo"):
+            _ok = 0
+            for ln in _arrive:
+                _ctx = {"operator": user["display_name"], "role": role, "device_id": dev_id, "stop_id": SCHOOL_STOP, "method": "GROUP_HANDOVER",
+                        "captured_ts": db.ts(), "client_uuid": str(uuid.uuid4()), "received_by": _who, **gps_fix(SCHOOL_STOP, gps_off)}
+                if offline:
+                    _ctx.update(offline=True, sync_state="PENDING")
+                    queue.append({"type": "event", "run_id": run["id"], "kind": "CHECK_OUT", "ctx": _ctx, "badge_code": None, "student_id": ln["student_id"]})
+                    _ok += 1
+                else:
+                    _ok += bool(E.process(run["id"], "CHECK_OUT", _ctx, student_id=ln["student_id"])["ok"])
+            if offline:
+                dstore.save_queue(dev_id, queue)
+            st.session_state[f"{K}_last"] = ("ok", f"{_ok} child(ren) handed over at school to {_who}." + (" · 📴 saved on device, will sync" if offline else ""))
+            st.rerun()
+
 st.divider()
 left, right = st.columns(2)
-cur_stop = st.session_state.get(f"{K}_stop", SCHOOL_STOP)
 with left:
     ob = [ln for ln in lines if ln["status"] in ("ONBOARD", "TRANSFER_PENDING")]
     st.subheader(f"🟢 {t('On board')} ({len(ob)})")
