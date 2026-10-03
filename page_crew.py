@@ -314,24 +314,41 @@ if not is_driver and _arrive and cur_stop == SCHOOL_STOP:
             st.rerun()
 
 st.divider()
-left, right = st.columns(2)
-with left:
-    ob = [ln for ln in lines if ln["status"] in ("ONBOARD", "TRANSFER_PENDING")]
-    st.subheader(f"🟢 {t('On board')} ({len(ob)})")
-    lines_table(ob, ("name", "class", "purpose", "stop_name", "status", "entry_ts"))
-with right:
-    ex = [ln for ln in lines if ln["status"] == "EXPECTED"]
-    here = [ln for ln in ex if (ln["purpose"] == "PICKUP" and ln["stop_id"] == cur_stop) or (ln["purpose"] == "DROPOFF" and cur_stop == SCHOOL_STOP)]
-    st.subheader(f"⏳ {t('Expected')} ({len(ex)})")
-    if here and not is_driver:
-        st.caption(f"{len(here)} {t('expected at this stop')}")
-    lines_table(sorted(ex, key=lambda ln: (ln not in here, ln["stop_seq"] or 0)), ("name", "class", "purpose", "stop_name"))
-    if ex and not is_driver:
-        ns = st.selectbox(t("Mark no-show"), [ln["student_id"] for ln in ex], index=None, placeholder="Child did not come…",
-                          format_func=lambda i: next(f"{ln['name']} · {ln['stop_name'] or t('School')}" for ln in ex if ln["student_id"] == i), key=f"{K}_ns")
-        if st.button(t("Mark no-show"), disabled=ns is None):
-            submit("NO_SHOW", sid=ns, method="CREW")
-            st.rerun()
+_auto = st.toggle("🔄 Auto-refresh lists every 10 s (shows scans made on other phones too)", value=True, key=f"{K}_auto")
+
+
+@st.fragment(run_every=10 if _auto else None)
+def _lists_panel():
+    _q = dstore.load_queue(dev_id) if dev_id else []
+    _lines = replica(run["id"], _q)[1] if _q else E.run_lines(run["id"])
+    _cnt = pd.Series([ln["status"] for ln in _lines]).value_counts().to_dict() if _lines else {}
+    h1, h2 = st.columns([1, 3])
+    if h1.button("🔄 Refresh", key=f"{K}_refresh", help="Reload the whole screen: counts, lists and the close-trip check"):
+        st.rerun()
+    h2.caption(f"Updated {db.now():%H:%M:%S} · on board {_cnt.get('ONBOARD', 0) + _cnt.get('TRANSFER_PENDING', 0)} · "
+               f"expected {_cnt.get('EXPECTED', 0)} · completed {_cnt.get('COMPLETED', 0) + _cnt.get('RETURNED', 0)}")
+    left, right = st.columns(2)
+    with left:
+        ob = [ln for ln in _lines if ln["status"] in ("ONBOARD", "TRANSFER_PENDING")]
+        st.subheader(f"🟢 {t('On board')} ({len(ob)})")
+        lines_table(ob, ("name", "class", "purpose", "stop_name", "status", "entry_ts"))
+    with right:
+        ex = [ln for ln in _lines if ln["status"] == "EXPECTED"]
+        here = [ln for ln in ex if (ln["purpose"] == "PICKUP" and ln["stop_id"] == cur_stop) or (ln["purpose"] == "DROPOFF" and cur_stop == SCHOOL_STOP)]
+        st.subheader(f"⏳ {t('Expected')} ({len(ex)})")
+        if here and not is_driver:
+            st.caption(f"{len(here)} {t('expected at this stop')}")
+        lines_table(sorted(ex, key=lambda ln: (ln not in here, ln["stop_seq"] or 0)), ("name", "class", "purpose", "stop_name"))
+        if ex and not is_driver:
+            ns = st.selectbox(t("Mark no-show"), [ln["student_id"] for ln in ex], index=None, placeholder="Child did not come…",
+                              format_func=lambda i: next(f"{ln['name']} · {ln['stop_name'] or t('School')}" for ln in ex if ln["student_id"] == i),
+                              key=f"{K}_ns")
+            if st.button(t("Mark no-show"), disabled=ns is None):
+                submit("NO_SHOW", sid=ns, method="CREW")
+                st.rerun()
+
+
+_lists_panel()
 
 with st.expander(t("All children on this trip")):
     lines_table(lines, ("name", "code", "class", "batch", "grp", "purpose", "stop_name", "status", "entry_ts", "exit_ts", "handover",
