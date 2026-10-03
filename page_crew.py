@@ -12,6 +12,7 @@ import reports as R
 from db import SCHOOL_STOP, TRIPS
 from i18n import t
 from qr_utils import decode_qr
+from qr_scanner import qr_scanner
 from ui import gps_fix, lines_table, msg, status_text
 
 user = st.session_state.user
@@ -244,8 +245,18 @@ if not is_driver:
                 st.session_state.pop(f"{K}_pending")
                 st.rerun()
 
-    tab_cam, tab_type, tab_man = st.tabs(["📷 " + t("Scan badge with camera"), "⌨️ " + t("Badge reader / type code"), "✍️ " + t("Manual entry")])
+    tab_cam, tab_type, tab_man, tab_photo = st.tabs(["📷 " + t("Scan badge with camera"), "⌨️ " + t("Badge reader / type code"),
+                                                     "✍️ " + t("Manual entry"), "📸 Photo scan"])
     with tab_cam:
+        st.caption("Uses the BACK camera and scans continuously — hold the badge inside the square; it is recorded automatically "
+                   "(beep). Set the stop and Check In / Check Out first. Allow camera access the first time.")
+        val = qr_scanner(key=f"{K}_live")
+        if val and val.get("nonce") and val["nonce"] != st.session_state.get(f"{K}_nonce"):
+            st.session_state[f"{K}_nonce"] = val["nonce"]
+            submit(kind, badge=val["code"], method="QR")
+            st.rerun()
+    with tab_photo:
+        st.caption("Backup: take a photo of the badge (if the live scanner does not start on this device).")
         shot = st.camera_input("QR", label_visibility="collapsed", key=f"{K}_cam{st.session_state.get(f'{K}_camn', 0)}")
         if shot is not None:
             code = decode_qr(shot.getvalue())
