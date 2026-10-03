@@ -40,6 +40,42 @@ def in_window(trip_no, dt):
     return parse_hm(d, a) - timedelta(minutes=15) <= dt <= parse_hm(d, b)
 
 
+def trips_for(batch, grp):
+    """Which of the five trips a batch/group rides, e.g. 'Trip 1 pickup, Trip 2 drop-off'."""
+    out = []
+    for no, t in TRIPS.items():
+        for b, g, p in t["movements"]:
+            if b == batch and g == grp:
+                out.append(f"Trip {no} {'pickup' if p == 'PICKUP' else 'drop-off'}")
+    return ", ".join(out)
+
+
+def cancel_run(run_id, user, role, reason="Started by mistake", con=None):
+    """Remove a trip that was started by mistake. Only allowed while nothing has been scanned on it."""
+    with db.tx(con) as c:
+        run = get_run(run_id, c)
+        if not run or run["status"] not in ("IN_PROGRESS", "PENDING_SYNC"):
+            return False, "Trip is not open."
+        if q1("SELECT id FROM events WHERE run_id=? AND result<>'REJECTED' LIMIT 1", (run_id,), c):
+            return False, "Children have already been scanned on this trip — it cannot be cancelled. Close it normally."
+        c.execute("DELETE FROM manifest WHERE run_id=?", (run_id,))
+        c.execute("DELETE FROM events WHERE run_id=?", (run_id,))
+        c.execute("DELETE FROM trip_runs WHERE id=?", (run_id,))
+        db.audit(user, role, "TRIP_CANCELLED", "trip_run", run_id, f"bus {run['bus_id']} trip {run['trip_no']} {run['date']}: {reason}", c)
+        return True, f"Trip {run['trip_no']} cancelled. You can now start the correct trip."
+
+
+def reset_day(date, user, role):
+    """Demo tool: remove all trips (and their scans, notices, incidents) for one date."""
+    with db.tx() as c:
+        ids = [r["id"] for r in q("SELECT id FROM trip_runs WHERE date=?", (date,), c)]
+        for t_ in ("manifest", "events", "notifications", "incidents"):
+            c.executemany(f"DELETE FROM {t_} WHERE run_id=?", [(i,) for i in ids])
+        c.execute("DELETE FROM trip_runs WHERE date=?", (date,))
+        db.audit(user, role, "DAY_RESET", "trip_runs", date, f"{len(ids)} trip(s) removed (demo tool)", c)
+        return len(ids)
+
+
 # ------------------------------------------------------------------ manifests
 def effective_assignment(student, date, trip_no, con):
     """Bus / stop for a student on a date+trip after approved change requests."""
@@ -261,7 +297,9 @@ def process(run_id, kind, ctx, badge_code=None, student_id=None, con=None, rnd=r
                               WHERE m.student_id=? AND r.date=? AND r.trip_no=?""", (student_id, run["date"], run["trip_no"]), c)
                 planned = manifest_for_student(stu, run["date"], run["trip_no"], c)
                 if not planned:
-                    return reject(f"{stu['name']} is not scheduled on Trip {run['trip_no']} (Batch {stu['batch']} {stu['grp']}).", student_id)
+                    return reject(f"NOT ON THIS TRIP: {stu['name']} is Batch {stu['batch']} {stu['grp']} and rides "
+                                  f"{trips_for(stu['batch'], stu['grp'])} — this is Trip {run['trip_no']} "
+                                  f"({TRIPS[run['trip_no']]['label']}).", student_id)
                 lid = c.execute("""INSERT INTO manifest(run_id, student_id, purpose, batch, grp, stop_id, status, entry_ts, entry_lat, entry_lon, note)
                                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                                 (run_id, student_id, planned["purpose"], stu["batch"], stu["grp"], planned["stop_id"], "TRANSFER_PENDING",

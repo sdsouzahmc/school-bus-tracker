@@ -366,6 +366,13 @@ with tabs[9]:
             st.session_state.su_last = ("ok", f"{n} bus(es) now on Trip {tn} with children on board (buses that already have an open trip or ran this trip today are skipped).")
             st.rerun()
     with st.container(border=True):
+        st.markdown("**Reset a day** — remove all trips, scans and notices for one date (to repeat a demo)")
+        rd = st.date_input("Date to reset", value=date.fromisoformat(db.today()), key="dm_rd").isoformat()
+        if st.button("Reset this day", disabled=role != "admin"):
+            n = E.reset_day(rd, user["username"], role)
+            st.session_state.su_last = ("ok", f"{n} trip(s) removed for {rd}.")
+            st.rerun()
+    with st.container(border=True):
         st.markdown("**History** — last N school days (Sunday–Thursday)")
         nd = st.slider("Days", 1, 10, 3)
         if st.button("Simulate history"):

@@ -34,6 +34,13 @@ def qr_png(text, box=8):
     return buf.getvalue()
 
 
+def _trips(s):
+    from db import TRIPS
+    t = [f"T{no}{'↑' if p == 'PICKUP' else '↓'}" for no, tr in TRIPS.items() for b, g, p in tr["movements"]
+         if b == s.get("batch") and g == s.get("grp")]
+    return "Trips: " + ", ".join(f"{x[:-1]} {'pickup' if x[-1] == '↑' else 'drop-off'}" for x in t)
+
+
 def id_cards_pdf(students, school_name):
     """A4 sheet of student ID cards (2 x 5 per page) with QR codes, ready to print and laminate."""
     buf = io.BytesIO()
@@ -62,7 +69,8 @@ def id_cards_pdf(students, school_name):
         c.drawString(x + 4 * mm, y + ch - 17 * mm, s["name"][:28])
         c.setFont("Helvetica", 8.5)
         lines = [f"ID: {s['code']}   {s.get('class_name') or ''}{s.get('section') or ''}",
-                 f"Batch {s.get('batch')} {s.get('grp') or ''}", f"Bus: {s.get('bus_no') or ''}", f"Stop: {(s.get('stop_name') or '')[:26]}"]
+                 f"Batch {s.get('batch')} {s.get('grp') or ''} · Bus {s.get('bus_no') or ''}", f"Stop: {(s.get('stop_name') or '')[:30]}",
+                 _trips(s)]
         for j, line in enumerate(lines):
             c.drawString(x + 4 * mm, y + ch - (23 + 5 * j) * mm, line)
         c.drawImage(ImageReader(io.BytesIO(qr_png(s["badge"], box=6))), x + cw - 36 * mm, y + 4 * mm, 32 * mm, 32 * mm)
