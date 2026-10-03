@@ -163,8 +163,9 @@ m2.metric(t("Expected"), cnt.get("EXPECTED", 0))
 m3.metric(t("Completed"), cnt.get("COMPLETED", 0) + cnt.get("RETURNED", 0))
 m4.metric("Absent / no-show", cnt.get("ABSENT_DECLARED", 0) + cnt.get("NO_SHOW", 0))
 
-if not is_driver and not closed_local and not db.q1("SELECT id FROM events WHERE run_id=? AND result<>'REJECTED' LIMIT 1", (run["id"],)):
-    with st.expander("↩ Wrong trip? Cancel it (only possible before anyone is scanned)"):
+if not is_driver and not closed_local and not db.q1("SELECT id FROM events WHERE run_id=? AND result<>'REJECTED' "
+                                                     "AND kind IN ('CHECK_IN','CHECK_OUT') LIMIT 1", (run["id"],)):
+    with st.expander("↩ Wrong trip? Cancel it (possible until the first child is checked in)", expanded=True):
         st.caption("This trip carries: " + ", ".join(f"Batch {b} {g} {p.lower().replace('dropoff', 'drop-off')}"
                                                      for b, g, p in TRIPS[run["trip_no"]]["movements"]))
         if st.button("Cancel this trip", key=f"{K}_cancel"):

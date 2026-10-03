@@ -56,8 +56,10 @@ def cancel_run(run_id, user, role, reason="Started by mistake", con=None):
         run = get_run(run_id, c)
         if not run or run["status"] not in ("IN_PROGRESS", "PENDING_SYNC"):
             return False, "Trip is not open."
-        if q1("SELECT id FROM events WHERE run_id=? AND result<>'REJECTED' LIMIT 1", (run_id,), c):
-            return False, "Children have already been scanned on this trip — it cannot be cancelled. Close it normally."
+        if q1("SELECT id FROM events WHERE run_id=? AND result<>'REJECTED' AND kind IN ('CHECK_IN','CHECK_OUT') LIMIT 1", (run_id,), c):
+            return False, "A child has already been checked in on this trip — it cannot be cancelled. Close it normally."
+        c.execute("DELETE FROM notifications WHERE run_id=?", (run_id,))
+        c.execute("DELETE FROM incidents WHERE run_id=?", (run_id,))
         c.execute("DELETE FROM manifest WHERE run_id=?", (run_id,))
         c.execute("DELETE FROM events WHERE run_id=?", (run_id,))
         c.execute("DELETE FROM trip_runs WHERE id=?", (run_id,))
