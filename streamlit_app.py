@@ -103,7 +103,7 @@ st.markdown("""<style>
 
 
 def login():
-    st.markdown("<div style='font-size:2.2rem;font-weight:800;letter-spacing:-0.02em;color:#1B2559'>Auto<span style='color:#3D4FD6'>Trace</span></div>"
+    st.markdown("<div style='font-size:2.2rem;font-weight:800;letter-spacing:-0.02em;color:#1B2559;padding-top:1.6rem;line-height:1.3'>Auto<span style='color:#3D4FD6'>Trace</span></div>"
                 f"<div style='font-size:1.25rem;font-weight:700;margin-top:-4px'>{t('School Bus Tracker')}</div>", unsafe_allow_html=True)
     st.caption(db.setting("school_name", db.SCHOOL_NAME) + " · " + db.setting("data_source", ""))
     c1, c2 = st.columns([1, 1])
