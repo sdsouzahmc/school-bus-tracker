@@ -97,7 +97,12 @@ def r_reconciliation(f):
     w, p = run_filter(f)
     out = df(f"""SELECT r.id AS Run, r.date AS Date, b.bus_no AS Bus, r.trip_no AS Trip, r.status AS "Trip status",
         COUNT(m.id) AS Planned, SUM(m.status IN ('COMPLETED','RETURNED','ABSENT_DECLARED','NO_SHOW','TRANSFERRED_OUT','CANCELLED')) AS "Accounted for",
-        r.sweep_by AS "Sweep by", substr(r.sweep_ts,12,5) AS "Sweep at", substr(r.end_ts,12,5) AS Closed, r.closed_by AS "Closed by"
+        SUM(m.status IN ('ONBOARD','TRANSFER_PENDING')) AS "On board at close",
+        r.sweep_by AS "Sweep by", substr(r.sweep_ts,12,5) AS "Sweep at", substr(r.start_ts,12,5) AS Started,
+        printf('%.5f, %.5f', r.start_lat, r.start_lon) AS "Start GPS", substr(r.end_ts,12,5) AS Ended,
+        printf('%.5f, %.5f', r.end_lat, r.end_lon) AS "End GPS",
+        (SELECT name FROM staff WHERE id=r.final_driver_id) || ' / ' || (SELECT name FROM staff WHERE id=r.final_supervisor_id) || ' / ' ||
+        (SELECT name FROM staff WHERE id=r.final_caretaker_id) AS "Final crew", r.closed_by AS "Closed by"
         FROM trip_runs r JOIN buses b ON b.id=r.bus_id LEFT JOIN manifest m ON m.run_id=r.id
         WHERE r.status IN ('CLOSED','PENDING_SYNC') AND {w} GROUP BY r.id ORDER BY r.date DESC, r.trip_no, b.bus_no""", p)
     if not out.empty:

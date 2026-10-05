@@ -69,8 +69,14 @@ if ids:
     rid = st.selectbox("Trip", ids, index=ids.index(default) if default in ids else 0,
                        format_func=lambda i: next(f"{r['bus_no']} · Trip {r['trip_no']} · {r['status']}" for r in runs if r["id"] == i))
     run = E.get_run(rid)
-    st.caption(f"{TRIPS[run['trip_no']]['label']} · started {run['start_ts']} · ended {run['end_ts'] or '—'} · sweep by {run['sweep_by'] or '—'}"
-               f" · crew {db.staff_name(run['driver_id'])} / {db.staff_name(run['supervisor_id'])} / {db.staff_name(run['caretaker_id'])}")
+    gps = lambda a, b: f"{a:.5f}, {b:.5f}" if a is not None and b is not None else "no GPS"
+    st.caption(f"{TRIPS[run['trip_no']]['label']}")
+    cA, cB = st.columns(2)
+    cA.markdown(f"**Start** {run['start_ts'] or '—'} · GPS {gps(run['start_lat'], run['start_lon'])}  \n"
+                f"Crew at start: {db.staff_name(run['driver_id'])} / {db.staff_name(run['supervisor_id'])} / {db.staff_name(run['caretaker_id'])}")
+    cB.markdown(f"**End** {run['end_ts'] or '— (trip open)'} · GPS {gps(run['end_lat'], run['end_lon']) if run['end_ts'] else '—'}  \n"
+                f"Final crew: {' / '.join(db.staff_name(x) for x in (run['final_driver_id'], run['final_supervisor_id'], run['final_caretaker_id'])) if run['final_driver_id'] else '—'}"
+                f" · Sweep by {run['sweep_by'] or '—'} {(run['sweep_ts'] or '')[11:16]}")
     tab1, tab2 = st.tabs(["Children", "Scan events"])
     with tab1:
         lines_table(E.run_lines(rid), ("name", "code", "class", "batch", "grp", "purpose", "stop_name", "status", "entry_ts", "exit_ts", "handover",

@@ -126,6 +126,15 @@ with tabs[1]:
                         db.x("UPDATE recipients SET active=0 WHERE id=?", (rid,))
                         db.audit(user["username"], role, "RECIPIENT_REMOVED", "student", s["code"], str(rid))
                         st.rerun()
+            with st.popover("👨‍👩‍👧 Link an existing guardian (siblings)"):
+                gq = st.text_input("Guardian name", key=f"lg{sid}", placeholder="e.g. Guardian 051")
+                gl = db.q("SELECT id, name, email FROM guardians WHERE name LIKE ? ORDER BY name LIMIT 20", (f"%{gq}%",)) if gq else []
+                if gl:
+                    gpick = st.selectbox("Guardian", [g["id"] for g in gl], format_func=lambda i: next(f"{g['name']} · {g['email']}" for g in gl if g["id"] == i), key=f"lgs{sid}")
+                    if st.button("Link as guardian + authorized recipient", key=f"lgb{sid}"):
+                        E.link_guardian(sid, gpick, user["username"], role)
+                        st.session_state.su_last = ("ok", "Guardian linked — they can now receive both children and see both in the parent portal.")
+                        st.rerun()
             st.markdown("**Emergency contacts**")
             st.dataframe(db.q("SELECT name AS Name, relation AS Relation, phone AS Phone FROM emergency_contacts WHERE student_id=?", (sid,)),
                          hide_index=True, width="stretch")
@@ -364,6 +373,12 @@ with tabs[9]:
         if st.button("Start live trips"):
             n = E.simulate_live(tn, [b["id"] for b in bl[:nb]])
             st.session_state.su_last = ("ok", f"{n} bus(es) now on Trip {tn} with children on board (buses that already have an open trip or ran this trip today are skipped).")
+            st.rerun()
+    with st.container(border=True):
+        st.markdown("**Prepare the 10 demo scenarios** — clears today's trips, restores normal crews, adds relief crew "
+                    "(Relief Driver / Supervisor / Care-taker) and links siblings Student 051 + Student 054 to Guardian 051")
+        if st.button("Prepare demo scenarios", type="primary", disabled=role != "admin"):
+            st.session_state.su_last = ("ok", " ".join(E.prepare_demo(user["username"], role)))
             st.rerun()
     with st.container(border=True):
         st.markdown("**Reset a day** — remove all trips, scans and notices for one date (to repeat a demo)")

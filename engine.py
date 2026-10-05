@@ -78,6 +78,44 @@ def reset_day(date, user, role):
         return len(ids)
 
 
+def link_guardian(student_id, guardian_id, user, role, as_recipient=True, con=None):
+    """Link an existing guardian to another child (siblings share a parent) and make them an authorized recipient."""
+    with db.tx(con) as c:
+        g = q1("SELECT * FROM guardians WHERE id=?", (guardian_id,), c)
+        c.execute("INSERT OR IGNORE INTO student_guardians VALUES (?,?,0)", (student_id, guardian_id))
+        if as_recipient and not q1("SELECT id FROM recipients WHERE student_id=? AND name=? AND active=1", (student_id, g["name"]), c):
+            c.execute("INSERT INTO recipients(student_id, name, relation, phone, id_number) VALUES (?,?,?,?,?)",
+                      (student_id, g["name"], g["relation"] or "Guardian", g["phone"] or "", "sibling link"))
+        db.audit(user, role, "GUARDIAN_LINKED", "student", student_id, f"{g['name']} linked (siblings)", c)
+
+
+def prepare_demo(user, role):
+    """Demo tool: clean today and set up the data the 10 normal scenarios need (siblings, relief crew)."""
+    removed = reset_day(db.today(), user, role)
+    out = [f"Today's trips cleared ({removed})."]
+    with db.tx() as c:
+        for name, r in (("Relief Driver", "driver"), ("Relief Supervisor", "supervisor"), ("Relief Care-taker", "caretaker")):
+            if not q1("SELECT id FROM staff WHERE name=?", (name,), c):
+                c.execute("INSERT INTO staff(name, role, phone) VALUES (?,?,?)", (name, r, "+974 5000 0000"))
+        out.append("Relief Driver / Supervisor / Care-taker available.")
+        for b in q("SELECT * FROM buses", (), c):      # restore each bus's normal crew (scenario 10 changes it)
+            n = int(b["bus_no"][-3:]) if b["bus_no"][-3:].isdigit() else 0
+            for col, nm in (("driver_id", f"Driver Demo {n}"), ("supervisor_id", f"Supervisor Demo {n}"), ("caretaker_id", f"Care-taker Demo {n}")):
+                st_ = q1("SELECT id FROM staff WHERE name=?", (nm,), c)
+                if st_:
+                    c.execute(f"UPDATE buses SET {col}=? WHERE id=?", (st_["id"], b["id"]))
+        c.execute("DELETE FROM absences WHERE date>=?", (db.today(),))
+        c.execute("DELETE FROM change_requests WHERE date>=?", (db.today(),))
+        a = q1("SELECT id FROM students WHERE code='ST051'", (), c)
+        bsib = q1("SELECT id FROM students WHERE code='ST054'", (), c)
+        g = q1("SELECT g.id FROM guardians g JOIN student_guardians sg ON sg.guardian_id=g.id WHERE sg.student_id=? AND sg.is_primary=1", (a["id"],), c) if a else None
+        if a and bsib and g:
+            link_guardian(bsib["id"], g["id"], user, role, con=c)
+            out.append("Siblings: Student 051 and Student 054 (Route 2 Stop 2) now share Guardian 051.")
+        db.audit(user, role, "DEMO_PREPARED", "demo", db.today(), " ".join(out), c)
+    return out
+
+
 # ------------------------------------------------------------------ manifests
 def effective_assignment(student, date, trip_no, con):
     """Bus / stop for a student on a date+trip after approved change requests."""

@@ -327,6 +327,19 @@ def _lists_panel():
         st.rerun()
     h2.caption(f"Updated {db.now():%H:%M:%S} · on board {_cnt.get('ONBOARD', 0) + _cnt.get('TRANSFER_PENDING', 0)} · "
                f"expected {_cnt.get('EXPECTED', 0)} · completed {_cnt.get('COMPLETED', 0) + _cnt.get('RETURNED', 0)}")
+    _up = []
+    for _s in [{"id": SCHOOL_STOP, "name": t("School"), "seq": 0}] + db.stops_of_bus(bus_id):
+        _pick = sum(1 for ln in _lines if ln["purpose"] == "PICKUP" and ln["status"] == "EXPECTED" and ln["stop_id"] == _s["id"])
+        _board = sum(1 for ln in _lines if ln["purpose"] == "DROPOFF" and ln["status"] == "EXPECTED") if _s["id"] == SCHOOL_STOP else 0
+        _drop = sum(1 for ln in _lines if ln["purpose"] == "DROPOFF" and ln["status"] == "ONBOARD" and ln["stop_id"] == _s["id"])
+        _hand = sum(1 for ln in _lines if ln["purpose"] == "PICKUP" and ln["status"] == "ONBOARD") if _s["id"] == SCHOOL_STOP else 0
+        if _pick or _board or _drop or _hand:
+            _up.append({"Stop": _s["name"], "To board": _pick + _board, "To get off": _drop + _hand})
+    with st.expander(f"🗺️ Upcoming stops ({len(_up)})", expanded=bool(_up)):
+        if _up:
+            st.dataframe(_up, hide_index=True, width="stretch")
+        else:
+            st.caption("No stops left — every child is accounted for.")
     left, right = st.columns(2)
     with left:
         ob = [ln for ln in _lines if ln["status"] in ("ONBOARD", "TRANSFER_PENDING")]
@@ -397,6 +410,9 @@ if st.button("⏹ " + t("Close trip"), type="primary", disabled=bool(bl) or not 
         st.session_state[f"{K}_last"] = ("warn", "Closed on the device — Pending Sync.")
     else:
         ok, m, _ = E.close_run(run["id"], sweeper, fd, fs, fc, g["lat"], g["lon"], user["username"], role)
+        if ok:
+            m += (f" Ended {db.now():%H:%M}, GPS {g['lat']:.5f}, {g['lon']:.5f}" if g["gps_ok"] else f" Ended {db.now():%H:%M}, GPS unavailable") + \
+                 f" · sweep by {sweeper} · final crew {db.staff_name(fd)} / {db.staff_name(fs)} / {db.staff_name(fc)}."
         st.session_state[f"{K}_last"] = ("ok" if ok else "error", m)
         st.session_state.pop(f"{K}_swept", None)
     st.rerun()
