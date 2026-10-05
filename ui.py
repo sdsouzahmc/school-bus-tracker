@@ -88,3 +88,50 @@ def lines_table(lines, cols=("name", "class", "batch", "grp", "purpose", "stop_n
     if "stop_name" in df:
         df["stop_name"] = df["stop_name"].fillna(t("School"))
     st.dataframe(df.rename(columns=names), hide_index=True, width="stretch")
+
+
+def bus_cards(runs):
+    """Live trip cards (one per open trip): route progress, movement, on board / capacity, crew, next stop."""
+    cards = []
+    for r in runs:
+        b = db.bus(r["bus_id"])
+        lines = db.q("""SELECT m.*, st.name AS stop_name, st.seq FROM manifest m LEFT JOIN stops st ON st.id=m.stop_id WHERE m.run_id=?""", (r["id"],))
+        total = len(lines) or 1
+        done = sum(1 for ln in lines if ln["status"] not in ("EXPECTED", "ONBOARD", "TRANSFER_PENDING"))
+        frac = done / total
+        onb = sum(1 for ln in lines if ln["status"] in ("ONBOARD", "TRANSFER_PENDING"))
+        purposes = {ln["purpose"] for ln in lines}
+        kind = "Pickup" if purposes == {"PICKUP"} else ("Drop-off" if purposes == {"DROPOFF"} else "Drop-off + pickup")
+        movements = sorted({f"Batch {ln['batch']} {ln['grp']} {'pickup' if ln['purpose'] == 'PICKUP' else 'drop-off'}" for ln in lines})
+        area = (b["route_name"] or "").replace("Route ", "")
+        if kind == "Pickup":
+            ends = (area or "Route", "School")
+        else:
+            ends = ("School", area or "Route")
+        pend = sorted([ln for ln in lines if (ln["status"] == "EXPECTED" and ln["purpose"] == "PICKUP") or
+                       (ln["status"] == "ONBOARD" and ln["purpose"] == "DROPOFF")], key=lambda ln: ln["seq"] or 0)
+        if any(ln["status"] == "EXPECTED" and ln["purpose"] == "DROPOFF" for ln in lines):
+            nxt = "School (boarding)"
+        elif pend:
+            nxt = pend[0]["stop_name"] or "School"
+        elif onb:
+            nxt = "School gate"
+        else:
+            nxt = "Ready to close"
+        offline = r["status"] == "PENDING_SYNC"
+        pill = "<span class='pill orange'>Offline</span>" if offline else f"<span class='pill'>{kind}</span>"
+        cards.append(f"""<div class='bc'><div class='top'><span class='no'>{b['bus_no']}</span><span class='area'>Trip {r['trip_no']}</span>
+<span style='margin-left:auto'>{pill}</span></div>
+<div class='prog'><div class='f' style='width:{frac * 100:.0f}%'></div><div class='k' style='left:calc({frac * 100:.0f}% - 8px)'></div></div>
+<div class='ends'><span>{ends[0]}</span><span>{ends[1]}</span></div>
+<div class='grid'><div><div class='l'>Movement</div><div class='v'>{'<br>'.join(movements[:2])}</div></div>
+<div><div class='l'>Onboard</div><div class='v'>{onb} / {b['capacity']}</div></div>
+<div><div class='l'>Driver</div><div class='v'>{staff_name(r['driver_id'])}</div></div>
+<div><div class='l'>Attendant</div><div class='v'>{staff_name(r['caretaker_id'])}</div></div>
+<div><div class='l'>Next</div><div class='v'>{nxt}</div></div>
+<div><div class='l'>Progress</div><div class='v'>{done} / {total} done</div></div></div></div>""")
+    st.markdown("<div class='buscards'>" + "".join(cards) + "</div>", unsafe_allow_html=True)
+
+
+def staff_name(i):
+    return db.staff_name(i) or "—"

@@ -8,9 +8,9 @@ import db
 import engine as E
 import reports as R
 from db import TRIPS
-from ui import bus_map, bus_positions, lines_table
+from ui import bus_cards, bus_map, bus_positions, lines_table
 
-st.title("🗺️ Live trips")
+st.title("Live Trips")
 runs_all = db.q("SELECT DISTINCT date FROM trip_runs ORDER BY date DESC")
 dates = [r["date"] for r in runs_all]
 c1, c2 = st.columns([1, 3])
@@ -40,6 +40,17 @@ def board():
     for h in hi:
         st.markdown(f"<div class='error'>🚨 <b>{h['kind'].replace('_', ' ')}</b> · {h['bus_no'] or ''} · {h['ts'][:16]} — {h['details']}</div>",
                     unsafe_allow_html=True)
+    open_runs = db.q("SELECT * FROM trip_runs WHERE date=? AND status IN ('IN_PROGRESS','PENDING_SYNC') ORDER BY bus_id", (D,))
+    if open_runs:
+        nonb = db.q1(f"SELECT COUNT(*) n FROM manifest WHERE status IN ('ONBOARD','TRANSFER_PENDING') AND run_id IN ({','.join('?' * len(open_runs))})",
+                     [r["id"] for r in open_runs])["n"]
+        noff = sum(r["status"] == "PENDING_SYNC" for r in open_runs)
+        st.markdown(f"<span class='pill' style='padding:6px 12px'>{len(open_runs) - noff} moving</span> "
+                    f"<span class='pill orange' style='padding:6px 12px'>{noff} offline</span> "
+                    f"<span class='pill grey' style='padding:6px 12px;background:#fff;border:1px solid #E3E7F0'>{nonb} students onboard</span>",
+                    unsafe_allow_html=True)
+        bus_cards(open_runs)
+        st.write("")
     pos = bus_positions(D)
     stops = [{"lat": s["lat"], "lon": s["lon"], "name": s["name"]} for s in db.q("SELECT name, lat, lon FROM stops")]
     st.caption("Bus positions come from the latest scan with GPS (demo). In production they come live from the Autotrace/FVTS GPS units.")

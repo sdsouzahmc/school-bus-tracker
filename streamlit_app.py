@@ -9,7 +9,8 @@ from i18n import rtl_css, t
 
 st.set_page_config(page_title="School Bus Tracker", page_icon="🚌", layout="wide", initial_sidebar_state="auto")
 
-DATASET = os.path.join(os.path.dirname(os.path.abspath(__file__)), "School_Bus_Trip_Dataset.xlsx")
+BASE = os.path.dirname(os.path.abspath(__file__))
+DATASET = os.path.join(BASE, "School_Bus_Trip_Dataset.xlsx")
 
 
 @st.cache_resource
@@ -29,18 +30,81 @@ def _boot():
 _boot()
 
 st.markdown("""<style>
-  .block-container {padding-top: 1.2rem;}
-  .ok   {background:#e6f6ea;border-left:6px solid #1e8e3e;padding:10px 14px;border-radius:8px;font-size:1.05rem;margin:6px 0}
-  .warn {background:#fff4e0;border-left:6px solid #e8a200;padding:10px 14px;border-radius:8px;font-size:1.05rem;margin:6px 0}
-  .error{background:#fde8e8;border-left:6px solid #d93025;padding:10px 14px;border-radius:8px;font-size:1.05rem;margin:6px 0}
-  .card {background:#f6f8fb;border:1px solid #e3e8ef;border-radius:10px;padding:10px 14px;margin:6px 0}
-  .muted{color:#667085;font-size:.85rem}
-  .pill {display:inline-block;padding:2px 10px;border-radius:12px;font-size:.8rem;font-weight:600;background:#eef2f7}
-</style>""" + rtl_css(), unsafe_allow_html=True)
+  :root { --navy:#1B2559; --indigo:#3D4FD6; --indigo-soft:#E9ECFC; --ink:#1A2036; --muted:#6B7390; --line:#E3E7F0;
+          --green:#2E9E5B; --orange:#E07A1F; --red:#D93025; }
+  .block-container {padding-top: 1.4rem; max-width: 1400px;}
+  h1, h2, h3 {color: var(--ink); letter-spacing: -0.01em;}
+  h1 {font-weight: 800 !important;}
+  /* white rounded cards for bordered containers */
+  div[data-testid="stVerticalBlockBorderWrapper"], div[data-testid="stContainer"][data-border="true"] {
+      background:#FFFFFF; border:1px solid var(--line) !important; border-radius:14px !important;
+      box-shadow: 0 1px 2px rgba(16,24,64,.04), 0 2px 8px rgba(16,24,64,.04); }
+  div[data-testid="stExpander"] details {background:#FFFFFF; border-radius:12px; border:1px solid var(--line);}
+  div[data-testid="stMetric"] {background:#FFFFFF; border:1px solid var(--line); border-radius:14px; padding:12px 16px;
+      box-shadow: 0 1px 2px rgba(16,24,64,.04);}
+  div[data-testid="stMetricValue"] {font-weight:800; color:var(--ink);}
+  div[data-testid="stDataFrame"] {border-radius:12px; overflow:hidden;}
+  /* sidebar */
+  section[data-testid="stSidebar"] {background: var(--navy);}
+  section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"] {border-radius:10px; margin:2px 6px; padding:8px 12px;}
+  section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"][aria-current="page"] {background: var(--indigo) !important;}
+  section[data-testid="stSidebar"] a[data-testid="stSidebarNavLink"] span {color:#E8ECFF !important; font-weight:500;}
+  .brand {font-size:1.7rem; font-weight:800; color:#FFFFFF; letter-spacing:-0.02em; margin:0 0 2px 4px;}
+  .brand b {color:#8EA2FF;}
+  .brand-sub {color:#AEB8E8; font-size:.8rem; margin:-6px 0 12px 2px;}
+  [data-testid='stSidebarHeader'] img, [data-testid='stLogo'] {height:2.4rem !important; max-width:220px;}
+  .nowrap{white-space:nowrap}
+  .kpi .lab{font-size:.8rem;line-height:1.2;min-height:2.1em}
+  .bc .top{flex-wrap:wrap}
+  /* status messages */
+  .ok   {background:#E8F6EE;border-left:6px solid var(--green);padding:10px 14px;border-radius:10px;font-size:1.02rem;margin:6px 0}
+  .warn {background:#FFF3E6;border-left:6px solid var(--orange);padding:10px 14px;border-radius:10px;font-size:1.02rem;margin:6px 0}
+  .error{background:#FDECEC;border-left:6px solid var(--red);padding:10px 14px;border-radius:10px;font-size:1.02rem;margin:6px 0}
+  .card {background:#FFFFFF;border:1px solid var(--line);border-radius:14px;padding:12px 16px;margin:6px 0}
+  .muted{color:var(--muted);font-size:.85rem}
+  .pill {display:inline-block;padding:2px 10px;border-radius:12px;font-size:.78rem;font-weight:600;background:var(--indigo-soft);color:var(--indigo)}
+  .pill.green{background:#E3F4EA;color:var(--green)} .pill.blue{background:var(--indigo);color:#fff}
+  .pill.grey{background:#EEF0F5;color:#5B6378} .pill.orange{background:#FDEBD8;color:var(--orange)} .pill.red{background:#FDE3E1;color:var(--red)}
+  .badge-sample{background:#FDE3E1;color:#C62828;font-weight:700;font-size:.75rem;padding:6px 12px;border-radius:8px;letter-spacing:.04em}
+  /* KPI cards */
+  .kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px;margin:8px 0 16px}
+  @media (max-width: 1100px){.kpis{grid-template-columns:repeat(3,minmax(0,1fr));}}
+  @media (max-width: 640px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  .kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:0 1px 2px rgba(16,24,64,.04)}
+  .kpi .lab{display:flex;align-items:center;gap:8px;color:#3A4160;font-size:.86rem;font-weight:500}
+  .kpi .val{font-size:2.1rem;font-weight:800;color:var(--ink);line-height:1.15;margin-top:4px}
+  .kpi .val.orange{color:var(--orange)} .kpi .sub{color:var(--muted);font-size:.75rem}
+  .kpi svg{width:20px;height:20px;flex:none}
+  .sect{display:flex;align-items:center;gap:8px;font-weight:700;color:var(--ink);font-size:1.02rem;margin:2px 0 8px}
+  .sect svg{width:18px;height:18px}
+  .bar{display:flex;align-items:center;gap:10px;margin:10px 0}
+  .bar .name{width:44%;font-size:.88rem;color:#2A3150}
+  .bar .track{flex:1;height:22px;background:transparent}
+  .bar .fill{height:22px;border-radius:3px}
+  .bar .num{width:36px;text-align:right;font-weight:800}
+  .safety{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .safety .lab{color:var(--muted);font-size:.8rem} .safety .v{font-size:1.5rem;font-weight:800;display:flex;align-items:center;gap:8px}
+  .att{display:flex;justify-content:space-between;align-items:center;background:#F7F8FC;border-radius:10px;padding:8px 12px;margin:6px 0;font-size:.88rem}
+  .att .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--orange);margin-right:8px}
+  /* live trip cards */
+  .buscards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+  @media (max-width: 1100px){.buscards{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media (max-width: 640px){.buscards{grid-template-columns:1fr;}}
+  .bc{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:0 1px 2px rgba(16,24,64,.04)}
+  .bc .top{display:flex;align-items:center;gap:8px} .bc .no{font-weight:800;font-size:1.05rem}
+  .bc .area{border:1px solid var(--line);border-radius:8px;padding:1px 8px;font-size:.75rem;color:#4A5272}
+  .bc .prog{position:relative;height:6px;background:#DCE3FB;border-radius:4px;margin:16px 0 4px}
+  .bc .prog .f{height:6px;background:#9DB0F7;border-radius:4px}
+  .bc .prog .k{position:absolute;top:-5px;width:16px;height:16px;border-radius:50%;background:var(--indigo);border:3px solid #fff;box-shadow:0 0 0 1px #c9d2f5}
+  .bc .ends{display:flex;justify-content:space-between;font-size:.72rem;color:var(--muted)}
+  .bc .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:10px}
+  .bc .l{font-size:.72rem;color:var(--muted)} .bc .v{font-size:.86rem;font-weight:600;color:var(--ink)}
+""" + rtl_css(), unsafe_allow_html=True)
 
 
 def login():
-    st.title("🚌 " + t("School Bus Tracker"))
+    st.markdown("<div style='font-size:2.2rem;font-weight:800;letter-spacing:-0.02em;color:#1B2559'>Auto<span style='color:#3D4FD6'>Trace</span></div>"
+                f"<div style='font-size:1.25rem;font-weight:700;margin-top:-4px'>{t('School Bus Tracker')}</div>", unsafe_allow_html=True)
     st.caption(db.setting("school_name", db.SCHOOL_NAME) + " · " + db.setting("data_source", ""))
     c1, c2 = st.columns([1, 1])
     with c1:
@@ -107,7 +171,9 @@ if "user" not in st.session_state:
 user = st.session_state.user
 role = user["role"]
 
+st.logo(os.path.join(BASE, "autotrace_logo.svg"), size="large", icon_image=os.path.join(BASE, "autotrace_icon.svg"))
 with st.sidebar:
+    st.markdown("<div class='brand-sub'>Student transport · " + db.setting("school_name", db.SCHOOL_NAME) + "</div>", unsafe_allow_html=True)
     st.markdown(f"**{user['display_name']}**  \n<span class='muted'>{role.title()} · {user['username']}</span>", unsafe_allow_html=True)
     lang = st.radio(t("Language"), ["English", "العربية"], horizontal=True, index=1 if st.session_state.get("lang") == "ar" else 0)
     if (lang == "العربية") != (st.session_state.get("lang") == "ar"):
@@ -122,22 +188,23 @@ with st.sidebar:
     st.caption(db.setting("data_source", ""))
 
 P = {
-    "crew": st.Page("page_crew.py", title=t("Crew app"), icon="📷"),
-    "receipt": st.Page("page_receipt.py", title=t("School receipt"), icon="🏫"),
-    "parent": st.Page("page_parent.py", title=t("My children"), icon="👪"),
-    "live": st.Page("page_live.py", title="Live trips", icon="🗺️"),
-    "lists": st.Page("page_lists.py", title="Daily bus lists", icon="📋"),
-    "exceptions": st.Page("page_exceptions.py", title="Exceptions & approvals", icon="🚨"),
-    "notices": st.Page("page_notices.py", title="Parent notices", icon="✉️"),
-    "reports": st.Page("page_reports.py", title="Reports", icon="📊"),
-    "setup": st.Page("page_setup.py", title="Setup & data", icon="⚙️"),
+    "dash": st.Page("page_dashboard.py", title="Overview", icon=":material/home:"),
+    "crew": st.Page("page_crew.py", title=t("Crew app"), icon=":material/qr_code_scanner:"),
+    "receipt": st.Page("page_receipt.py", title=t("School receipt"), icon=":material/school:"),
+    "parent": st.Page("page_parent.py", title=t("My children"), icon=":material/family_restroom:"),
+    "live": st.Page("page_live.py", title="Live trips", icon=":material/directions_bus:"),
+    "lists": st.Page("page_lists.py", title="Daily bus lists", icon=":material/groups:"),
+    "exceptions": st.Page("page_exceptions.py", title="Incidents & approvals", icon=":material/warning:"),
+    "notices": st.Page("page_notices.py", title="Parent notices", icon=":material/mail:"),
+    "reports": st.Page("page_reports.py", title="Reports", icon=":material/bar_chart:"),
+    "setup": st.Page("page_setup.py", title="Setup & data", icon=":material/settings:"),
 }
 MENU = {
     "supervisor": ["crew"], "caretaker": ["crew"], "driver": ["crew"],
     "receiving": ["receipt"],
     "guardian": ["parent"],
-    "dispatcher": ["live", "lists", "exceptions", "notices", "reports", "crew", "receipt"],
-    "manager": ["live", "lists", "exceptions", "notices", "reports", "setup", "crew", "receipt"],
-    "admin": ["live", "lists", "exceptions", "notices", "reports", "setup", "crew", "receipt", "parent"],
+    "dispatcher": ["dash", "live", "lists", "exceptions", "notices", "reports", "crew", "receipt"],
+    "manager": ["dash", "live", "lists", "exceptions", "notices", "reports", "setup", "crew", "receipt"],
+    "admin": ["dash", "live", "lists", "exceptions", "notices", "reports", "setup", "crew", "receipt", "parent"],
 }
 st.navigation([P[k] for k in MENU.get(role, [])]).run()

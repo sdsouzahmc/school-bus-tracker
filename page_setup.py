@@ -39,6 +39,14 @@ with tabs[0]:
     k = db.q1("""SELECT (SELECT COUNT(*) FROM students) s, (SELECT COUNT(*) FROM buses) b, (SELECT COUNT(*) FROM trip_runs) t,
                  (SELECT COUNT(*) FROM events) e, (SELECT MIN(date) FROM trip_runs) d1, (SELECT MAX(date) FROM trip_runs) d2""")
     st.caption(f"{k['s']} students · {k['b']} buses · {k['t']} trips · {k['e']} scan events · trip dates {k['d1'] or '—'} to {k['d2'] or '—'}")
+    with st.form("school_name_form", border=False):
+        cN1, cN2 = st.columns([3, 1], vertical_alignment="bottom")
+        nm = cN1.text_input("School name (shown on dashboard, sidebar and ID cards)", value=db.setting("school_name", db.SCHOOL_NAME),
+                            disabled=role != "admin")
+        if cN2.form_submit_button("Save name", disabled=role != "admin") and nm.strip():
+            db.set_setting("school_name", nm.strip())
+            db.audit(user["username"], role, "SETTING", "setting", "school_name", nm.strip())
+            st.rerun()
     if role != "admin":
         st.info("Only the administrator can replace the data.")
     else:
