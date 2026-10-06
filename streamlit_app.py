@@ -24,6 +24,15 @@ def _boot():
             import_workbook(DATASET, os.path.basename(DATASET))
         else:
             db.init_db(reset=True)
+    # one-time tidy of older data: production-style names
+    db.x("UPDATE staff SET name=REPLACE(name,' Demo','') WHERE name LIKE '% Demo%'")
+    db.x("UPDATE staff SET name='Dispatcher' WHERE name='Dispatcher Demo'")
+    db.x("UPDATE users SET display_name=REPLACE(display_name,' Demo','') WHERE display_name LIKE '% Demo%'")
+    db.x("UPDATE users SET display_name='Dispatcher' WHERE display_name='Dispatcher Demo'")
+    db.x("UPDATE trip_runs SET sweep_by=REPLACE(sweep_by,' Demo','') WHERE sweep_by LIKE '% Demo%'")
+    db.x("UPDATE manifest SET received_by=REPLACE(received_by,' Demo','') WHERE received_by LIKE '% Demo%'")
+    if "demo" in (db.setting("school_name", "") or "").lower():
+        db.set_setting("school_name", db.SCHOOL_NAME)
     return True
 
 
