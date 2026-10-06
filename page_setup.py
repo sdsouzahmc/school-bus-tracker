@@ -383,7 +383,7 @@ with tabs[9]:
             st.session_state.su_last = ("ok", f"{n} bus(es) now on Trip {tn} with children on board (buses that already have an open trip or ran this trip today are skipped).")
             st.rerun()
     with st.container(border=True):
-        st.markdown("**Prepare the 10 demo scenarios** — clears today's trips, restores normal crews, adds relief crew "
+        st.markdown("**Prepare the 10 demo scenarios** — clears today's open trips (closed trips are kept), restores normal crews, adds relief crew "
                     "(Relief Driver / Supervisor / Care-taker) and links siblings Student 051 + Student 054 to Guardian 051")
         if st.button("Prepare demo scenarios", type="primary", disabled=role != "admin"):
             st.session_state.su_last = ("ok", " ".join(E.prepare_demo(user["username"], role)))
@@ -401,7 +401,8 @@ with tabs[9]:
 # ------------------------------------------------------------------ reset trip data
 with tabs[10]:
     st.markdown("**Reset trip data** — permanently remove trips for a date so they can be run again. "
-                "Removes each trip's children list, scans, parent notices and incidents. The reset is recorded in the audit log.")
+                "Removes each trip's children list, scans, parent notices and incidents. The reset is recorded in the audit log.  \n"
+                "🔒 **Closed trips are final and are never reset.** Only trips that are planned, in progress or pending sync can be removed.")
     if role != "admin":
         st.info("Only the administrator can reset trip data.")
     else:
@@ -419,10 +420,20 @@ with tabs[10]:
             st.warning("Select a date to continue — the date is mandatory.")
         else:
             D_ = rdate.isoformat()
-            runs_ = E.reset_scope(D_, rbus, rtrip)
+            all_ = E.reset_scope(D_, rbus, rtrip)
+            runs_ = [r for r in all_ if r["status"] != "CLOSED"]
+            locked_ = [r for r in all_ if r["status"] == "CLOSED"]
             pc_ = E.parent_changes_scope(D_, rbus, rtrip)
             n_pc = len(pc_["absences"]) + len(pc_["change_requests"])
-            if not runs_:
+            if locked_:
+                st.markdown(f"**🔒 {len(locked_)} closed trip(s) — locked, will be kept:**")
+                st.dataframe(pd.DataFrame([{"Bus": r["bus_no"], "Trip": r["trip_no"], "Status": "Closed (locked)",
+                                            "Started": (r["start_ts"] or "")[11:16], "Ended": (r["end_ts"] or "")[11:16],
+                                            "Children": r["children"], "Scans": r["scans"]} for r in locked_]),
+                             hide_index=True, width="stretch")
+            if not runs_ and locked_:
+                st.info("Every matching trip is closed, so there is nothing that can be reset.")
+            elif not runs_:
                 st.info(f"No trips found for {D_}" + (f" · {next(b['bus_no'] for b in bl_ if b['id'] == rbus)}" if rbus else "")
                         + (f" · Trip {rtrip}" if rtrip else "") + ". Nothing to reset.")
             else:
@@ -439,9 +450,10 @@ with tabs[10]:
             sure = st.checkbox("I understand this permanently deletes the selected trip data", key="rs_ok",
                                disabled=not runs_ and not (also and n_pc))
             if st.button("Reset trip data", type="primary", disabled=not sure or (not runs_ and not (also and n_pc)), key="rs_go"):
-                n, m = E.reset_trips(D_, user["username"], role, bus_id=rbus, trip_no=rtrip, parent_changes=also)
+                n, m, k = E.reset_trips(D_, user["username"], role, bus_id=rbus, trip_no=rtrip, parent_changes=also)
                 st.session_state.su_last = ("ok", f"Reset done for {D_}: {n} trip(s) removed"
-                                            + (f", {m} absence/change request(s) removed" if also else "") + ". The trip(s) can now be started again.")
+                                            + (f", {m} absence/change request(s) removed" if also else "") + (f", {k} closed trip(s) kept" if k else "")
+                                            + ". The removed trip(s) can now be started again.")
                 for k_ in ("rs_ok", "rs_pc"):
                     st.session_state.pop(k_, None)
                 st.rerun()

@@ -94,6 +94,9 @@ def parent_changes_scope(date, bus_id=None, trip_no=None, con=None):
             sql += " AND s.bus_id=?"; p.append(bus_id)
         if trip_no:
             sql += " AND x.trip_no=?"; p.append(trip_no)
+        # closed trips are final: keep absences / requests that belong to a closed trip of the child's bus
+        sql += """ AND NOT EXISTS (SELECT 1 FROM trip_runs r WHERE r.date=x.date AND r.bus_id=s.bus_id AND r.status='CLOSED'
+                                   AND (x.trip_no IS NULL OR r.trip_no=x.trip_no))"""
         out[tbl] = [r["id"] for r in q(sql, p, con)]
     return out
 
@@ -105,7 +108,8 @@ def reset_trips(date, user, role, bus_id=None, trip_no=None, parent_changes=Fals
         raise ValueError("Date is required.")
     with db.tx() as c:
         runs = reset_scope(date, bus_id, trip_no, c)
-        ids = [r["id"] for r in runs]
+        kept = [r for r in runs if r["status"] == "CLOSED"]      # a closed trip is final and can never be reset
+        ids = [r["id"] for r in runs if r["status"] != "CLOSED"]
         for t_ in ("manifest", "events", "notifications", "incidents"):
             c.executemany(f"DELETE FROM {t_} WHERE run_id=?", [(i,) for i in ids])
         c.executemany("DELETE FROM trip_runs WHERE id=?", [(i,) for i in ids])
@@ -118,13 +122,14 @@ def reset_trips(date, user, role, bus_id=None, trip_no=None, parent_changes=Fals
         bus_no = q1("SELECT bus_no FROM buses WHERE id=?", (bus_id,), c)["bus_no"] if bus_id else "all buses"
         scope = f"{date} · {bus_no} · {'Trip ' + str(trip_no) if trip_no else 'all trips'}"
         db.audit(user, role, "TRIP_DATA_RESET", "trip_runs", date,
-                 f"{scope}: {len(ids)} trip(s) removed" + (f", {removed_pc} absence/change request(s) removed" if parent_changes else ""), c)
-        return len(ids), removed_pc
+                 f"{scope}: {len(ids)} trip(s) removed, {len(kept)} closed trip(s) kept" + (f", {removed_pc} absence/change request(s) removed" if parent_changes else ""), c)
+        return len(ids), removed_pc, len(kept)
 
 
 def reset_day(date, user, role):
-    """Remove all trips for one date (used by Prepare demo scenarios)."""
-    return reset_trips(date, user, role)[0]
+    """Remove all open trips for one date (used by Prepare demo scenarios). Closed trips are kept."""
+    n, _, kept = reset_trips(date, user, role)
+    return n, kept
 
 
 def link_guardian(student_id, guardian_id, user, role, as_recipient=True, con=None):
@@ -140,8 +145,8 @@ def link_guardian(student_id, guardian_id, user, role, as_recipient=True, con=No
 
 def prepare_demo(user, role):
     """Demo tool: clean today and set up the data the 10 normal scenarios need (siblings, relief crew)."""
-    removed = reset_day(db.today(), user, role)
-    out = [f"Today's trips cleared ({removed})."]
+    removed, kept = reset_day(db.today(), user, role)
+    out = [f"Today's open trips cleared ({removed})." + (f" {kept} closed trip(s) kept — closed trips cannot be reset." if kept else "")]
     with db.tx() as c:
         for name, r in (("Relief Driver", "driver"), ("Relief Supervisor", "supervisor"), ("Relief Care-taker", "caretaker")):
             if not q1("SELECT id FROM staff WHERE name=?", (name,), c):
