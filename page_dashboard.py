@@ -32,7 +32,7 @@ h1.markdown(f"<div style='font-size:1.9rem;font-weight:800;line-height:1.1'>Stud
 with h2:
     c1, c2 = st.columns([3, 2], vertical_alignment="center")
     auto = c2.toggle("Live", value=True, help="Refresh every 15 seconds (for a TV screen)")
-    c1.markdown(f"<div style='text-align:right'><span class='badge-sample'>SAMPLE DATA</span> &nbsp; "
+    c1.markdown(f"<div style='text-align:right'>"
                 f"<span style='color:#3A4160;white-space:nowrap'>{db.now():%d %b %Y} &nbsp;|&nbsp; {db.now():%I:%M %p} &nbsp;|&nbsp; Qatar</span></div>",
                 unsafe_allow_html=True)
 

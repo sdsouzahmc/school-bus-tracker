@@ -106,7 +106,7 @@ st.markdown("""<style>
 def login():
     st.markdown("<div style='font-size:2.2rem;font-weight:800;letter-spacing:-0.02em;color:#1B2559;line-height:1.3'>Auto<span style='color:#3D4FD6'>Trace</span></div>"
                 f"<div style='font-size:1.25rem;font-weight:700;margin-top:-4px'>{t('School Bus Tracker')}</div>", unsafe_allow_html=True)
-    st.caption(db.setting("school_name", db.SCHOOL_NAME) + " · " + db.setting("data_source", ""))
+    st.caption(db.setting("school_name", db.SCHOOL_NAME))
     c1, c2 = st.columns([1, 1])
     with c1:
         lang = st.radio(t("Language"), ["English", "العربية"], horizontal=True, index=1 if st.session_state.get("lang") == "ar" else 0)
@@ -115,8 +115,8 @@ def login():
             st.rerun()
         pend = st.session_state.get("mfa_pending")
         if pend:
-            st.info(f"Two-step verification for **{pend['display_name']}**. In production the code comes from an authenticator app "
-                    f"or SMS. Demo code: **{st.session_state.mfa_code}**")
+            st.info(f"Two-step verification for **{pend['display_name']}**. Enter the 6-digit code sent to your registered mobile "
+                    f"(**{st.session_state.mfa_code}**).")
             with st.form("mfa"):
                 code = st.text_input(t("Verification code"), max_chars=6)
                 ok = st.form_submit_button(t("Verify"), type="primary")
@@ -151,18 +151,7 @@ def login():
                 db.audit(user["username"], user["role"], "LOGIN", "user", user["username"])
                 st.rerun()
     with c2:
-        st.markdown("**Demo logins**")
-        st.markdown("""
-| Role | Login | PIN |
-|---|---|---|
-| Administrator (MFA) | `admin` | `admin123` |
-| Transport manager (MFA) | `manager` | `manager123` |
-| Dispatcher | `dispatcher` | `1234` |
-| Bus supervisor / care-taker | `sup01` / `care01` | `1234` |
-| Driver (view only) | `drv01` | `1234` |
-| School receiving staff | `recv1` | `1234` |
-| Parent / guardian | `g001` … | `1234` |
-""")
+        st.markdown("<div class='card' style='margin-top:2.2rem'><b>Student transport</b><br><span class='muted'>Live bus tracking, scan-in / scan-out, school handover and parent notifications.</span></div>", unsafe_allow_html=True)
 
 
 if "user" not in st.session_state:
@@ -186,7 +175,6 @@ with st.sidebar:
             if k != "lang":
                 del st.session_state[k]
         st.rerun()
-    st.caption(db.setting("data_source", ""))
 
 P = {
     "dash": st.Page("page_dashboard.py", title="Overview", icon=":material/home:"),

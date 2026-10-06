@@ -53,11 +53,11 @@ def board():
         st.write("")
     pos = bus_positions(D)
     stops = [{"lat": s["lat"], "lon": s["lon"], "name": s["name"]} for s in db.q("SELECT name, lat, lon FROM stops")]
-    st.caption("Bus positions come from the latest scan with GPS (demo). In production they come live from the Autotrace/FVTS GPS units.")
+    st.caption("Bus positions from the latest GPS fix.")
     bus_map(pos, stops)
     tbl = R.r_trip_summary({"d1": D, "d2": D})
     if tbl.empty:
-        st.info("No trips on this date. Crew start trips from the Crew app; demo data can be generated in Setup → Demo tools.")
+        st.info("No trips on this date.")
         return
     st.dataframe(tbl, hide_index=True, width="stretch", key="live_tbl", on_select="rerun", selection_mode="single-row")
 

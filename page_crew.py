@@ -47,8 +47,8 @@ queue = dstore.load_queue(dev_id) if dev_id else []
 
 with st.expander("📶 Device: connection & GPS", expanded=bool(queue)):
     c1, c2 = st.columns(2)
-    offline = c1.toggle(t("Offline mode (simulate no network)"), key=f"{K}_off")
-    gps_off = c2.toggle(t("GPS unavailable (simulate)"), key=f"{K}_gps")
+    offline = c1.toggle(t("Offline mode"), key=f"{K}_off")
+    gps_off = c2.toggle(t("GPS unavailable"), key=f"{K}_gps")
     if queue:
         st.warning(f"{len(queue)} action(s) stored on this device (encrypted), waiting to sync.")
         if not offline and st.button(f"🔄 {t('Sync now')} ({len(queue)})", type="primary", disabled=is_driver):
@@ -125,8 +125,7 @@ if not run:
     avail = [n for n in TRIPS if n not in runs_today] or [default_trip]
     trip_no = st.selectbox(t("Trip"), avail, index=avail.index(default_trip) if default_trip in avail else 0, format_func=lambda n: f"Trip {n} · {TRIPS[n]['window'][0]}–{TRIPS[n]['window'][1]} · {TRIPS[n]['label']}")
     if not E.in_window(trip_no, db.now()):
-        st.caption(f"ℹ Outside the scheduled window ({TRIPS[trip_no]['window'][0]}–{TRIPS[trip_no]['window'][1]}). Allowed for the demo; "
-                   "the punctuality report will show it.")
+        st.caption(f"ℹ Outside the scheduled window ({TRIPS[trip_no]['window'][0]}–{TRIPS[trip_no]['window'][1]}). It will show on the punctuality report.")
 
     def crew_pick(label, r, default):
         opts = db.q("SELECT id, name FROM staff WHERE role=? ORDER BY bus_id=? DESC, name", (r, bus_id))

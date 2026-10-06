@@ -149,8 +149,10 @@ def load(data, source_name="School_Bus_Trip_Dataset.xlsx", shift_to_past=True):
     con = db.connect()
     try:
         c = con.cursor()
+        for x in data["Crew"]:
+            x["Crew_Name"] = str(x["Crew_Name"]).replace(" Demo", "")
         school = next(r for r in data["Locations"] if r["Location_Type"] == "School")
-        for k, v in (("school_lat", school["Latitude"]), ("school_lon", school["Longitude"]), ("school_name", school["Location_Name"]),
+        for k, v in (("school_lat", school["Latitude"]), ("school_lon", school["Longitude"]), ("school_name", db.SCHOOL_NAME if "demo" in str(school["Location_Name"]).lower() else school["Location_Name"]),
                      ("data_source", f"{source_name} ({len(data['Students'])} students, "
                                      f"{len({r['Bus_ID'] for r in data['Trips']})} buses{note})")):
             c.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", (k, str(v)))
@@ -328,10 +330,10 @@ def load(data, source_name="School_Bus_Trip_Dataset.xlsx", shift_to_past=True):
         # office users
         mid = next((staff[x["Crew_ID"]] for x in data["Crew"] if ROLE.get(x["Role"]) == "manager"), None)
         aid = c.execute("INSERT INTO staff(name, role) VALUES ('System Administrator','admin')").lastrowid
-        did = c.execute("INSERT INTO staff(name, role) VALUES ('Dispatcher Demo','dispatcher')").lastrowid
+        did = c.execute("INSERT INTO staff(name, role) VALUES ('Dispatcher','dispatcher')").lastrowid
         user("admin", "admin123", "admin", "System Administrator", aid)
         user("manager", "manager123", "manager", next((x["Crew_Name"] for x in data["Crew"] if ROLE.get(x["Role"]) == "manager"), "Manager"), mid)
-        user("dispatcher", "1234", "dispatcher", "Dispatcher Demo", did)
+        user("dispatcher", "1234", "dispatcher", "Dispatcher", did)
         for i, rid in enumerate(recv_ids or ["SCHOOL_RECEIVER_01"], start=1):
             user(f"recv{i}", "1234", "receiving", rid.replace("_", " ").title(), staff[rid])
         c.execute("INSERT INTO audit(ts, username, role, action, entity, entity_id, details) VALUES (?,?,?,?,?,?,?)",

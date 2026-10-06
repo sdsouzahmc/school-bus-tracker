@@ -12,8 +12,8 @@ user = st.session_state.user
 st.title("✉️ Parent notices")
 if "nt_last" in st.session_state:
     msg(*st.session_state.pop("nt_last"))
-st.caption("Every accepted movement sends an in-app notice and an e-mail to each verified guardian. E-mail delivery is simulated "
-           "(about 6 % fail and can be retried). Notices from scans captured offline are labelled as delayed.")
+st.caption("Every accepted movement sends an in-app notice and an e-mail to each verified guardian. Failed e-mails can be retried; "
+           "notices from scans captured offline are labelled as delayed.")
 
 k = db.q1("""SELECT COUNT(*) n, SUM(status='FAILED') f, SUM(attempts>1) r, SUM(delayed_offline) d FROM notifications""")
 m = st.columns(4)

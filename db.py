@@ -11,7 +11,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("SBT_DB", os.path.join(BASE, "school_bus.db"))
 TZ = ZoneInfo("Asia/Qatar")
 
-SCHOOL_NAME = "Demo International School, Doha"
+SCHOOL_NAME = "Shantiniketan Indian School"
 SCHOOL_LAT, SCHOOL_LON = 25.3052, 51.4676
 SCHOOL_STOP = 0           # pseudo stop id used for "at school"
 TRANSPORT_PHONE = "+974 4400 0000"

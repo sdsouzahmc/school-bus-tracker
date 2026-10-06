@@ -100,7 +100,7 @@ def prepare_demo(user, role):
         out.append("Relief Driver / Supervisor / Care-taker available.")
         for b in q("SELECT * FROM buses", (), c):      # restore each bus's normal crew (scenario 10 changes it)
             n = int(b["bus_no"][-3:]) if b["bus_no"][-3:].isdigit() else 0
-            for col, nm in (("driver_id", f"Driver Demo {n}"), ("supervisor_id", f"Supervisor Demo {n}"), ("caretaker_id", f"Care-taker Demo {n}")):
+            for col, nm in (("driver_id", f"Driver {n}"), ("supervisor_id", f"Supervisor {n}"), ("caretaker_id", f"Care-taker {n}")):
                 st_ = q1("SELECT id FROM staff WHERE name=?", (nm,), c)
                 if st_:
                     c.execute(f"UPDATE buses SET {col}=? WHERE id=?", (st_["id"], b["id"]))
