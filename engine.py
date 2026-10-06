@@ -67,15 +67,64 @@ def cancel_run(run_id, user, role, reason="Started by mistake", con=None):
         return True, f"Trip {run['trip_no']} cancelled. You can now start the correct trip."
 
 
-def reset_day(date, user, role):
-    """Demo tool: remove all trips (and their scans, notices, incidents) for one date."""
+def reset_scope(date, bus_id=None, trip_no=None, con=None):
+    """Trips that a reset for this date / bus / trip would remove, with counts (for the confirmation preview)."""
+    sql = """SELECT r.id, b.bus_no, r.trip_no, r.status, r.start_ts, r.end_ts,
+                    (SELECT COUNT(*) FROM manifest m WHERE m.run_id=r.id) children,
+                    (SELECT COUNT(*) FROM manifest m WHERE m.run_id=r.id AND m.status IN ('ONBOARD','TRANSFER_PENDING')) onboard,
+                    (SELECT COUNT(*) FROM events e WHERE e.run_id=r.id) scans,
+                    (SELECT COUNT(*) FROM notifications n WHERE n.run_id=r.id) notices,
+                    (SELECT COUNT(*) FROM incidents i WHERE i.run_id=r.id) incidents
+             FROM trip_runs r JOIN buses b ON b.id=r.bus_id WHERE r.date=?"""
+    p = [date]
+    if bus_id:
+        sql += " AND r.bus_id=?"; p.append(bus_id)
+    if trip_no:
+        sql += " AND r.trip_no=?"; p.append(trip_no)
+    return q(sql + " ORDER BY b.bus_no, r.trip_no", p, con)
+
+
+def parent_changes_scope(date, bus_id=None, trip_no=None, con=None):
+    """Absences and change requests for this date (optionally for one bus's children / one trip)."""
+    out = {}
+    for tbl in ("absences", "change_requests"):
+        sql = f"SELECT x.id FROM {tbl} x JOIN students s ON s.id=x.student_id WHERE x.date=?"
+        p = [date]
+        if bus_id:
+            sql += " AND s.bus_id=?"; p.append(bus_id)
+        if trip_no:
+            sql += " AND x.trip_no=?"; p.append(trip_no)
+        out[tbl] = [r["id"] for r in q(sql, p, con)]
+    return out
+
+
+def reset_trips(date, user, role, bus_id=None, trip_no=None, parent_changes=False):
+    """Admin tool: permanently remove trips for a date (optionally one bus and/or one trip) with their manifest, scans,
+    parent notices and incidents, so the trip(s) can be run again. The reset itself is written to the audit log."""
+    if not date:
+        raise ValueError("Date is required.")
     with db.tx() as c:
-        ids = [r["id"] for r in q("SELECT id FROM trip_runs WHERE date=?", (date,), c)]
+        runs = reset_scope(date, bus_id, trip_no, c)
+        ids = [r["id"] for r in runs]
         for t_ in ("manifest", "events", "notifications", "incidents"):
             c.executemany(f"DELETE FROM {t_} WHERE run_id=?", [(i,) for i in ids])
-        c.execute("DELETE FROM trip_runs WHERE date=?", (date,))
-        db.audit(user, role, "DAY_RESET", "trip_runs", date, f"{len(ids)} trip(s) removed (demo tool)", c)
-        return len(ids)
+        c.executemany("DELETE FROM trip_runs WHERE id=?", [(i,) for i in ids])
+        removed_pc = 0
+        if parent_changes:
+            pc = parent_changes_scope(date, bus_id, trip_no, c)
+            for tbl, rows in pc.items():
+                c.executemany(f"DELETE FROM {tbl} WHERE id=?", [(i,) for i in rows])
+                removed_pc += len(rows)
+        bus_no = q1("SELECT bus_no FROM buses WHERE id=?", (bus_id,), c)["bus_no"] if bus_id else "all buses"
+        scope = f"{date} · {bus_no} · {'Trip ' + str(trip_no) if trip_no else 'all trips'}"
+        db.audit(user, role, "TRIP_DATA_RESET", "trip_runs", date,
+                 f"{scope}: {len(ids)} trip(s) removed" + (f", {removed_pc} absence/change request(s) removed" if parent_changes else ""), c)
+        return len(ids), removed_pc
+
+
+def reset_day(date, user, role):
+    """Remove all trips for one date (used by Prepare demo scenarios)."""
+    return reset_trips(date, user, role)[0]
 
 
 def link_guardian(student_id, guardian_id, user, role, as_recipient=True, con=None):

@@ -24,7 +24,7 @@ if "su_last" in st.session_state:
     lv, m = st.session_state.pop("su_last")
     msg(lv, m)
 
-tabs = st.tabs(["Data source", "Students", "Badges & ID cards", "Buses & crew", "Stops", "CSV import", "Devices", "Users", "Backup", "Demo tools"])
+tabs = st.tabs(["Data source", "Students", "Badges & ID cards", "Buses & crew", "Stops", "CSV import", "Devices", "Users", "Backup", "Demo tools", "Reset trip data"])
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATASET = os.path.join(APP_DIR, "School_Bus_Trip_Dataset.xlsx")
 
@@ -90,7 +90,7 @@ with tabs[1]:
                    WHERE s.name LIKE ? OR s.code LIKE ? ORDER BY s.code LIMIT 300""", (f"%{q_}%", f"%{q_}%"))
     st.dataframe(pd.DataFrame(rows).drop(columns=["id"]) if rows else pd.DataFrame(), hide_index=True, width="stretch", height=260)
     if rows:
-        sid = st.selectbox("Edit student", [r["id"] for r in rows], format_func=lambda i: next(f"{r['ID']} — {r['Name']}" for r in rows if r["id"] == i))
+        sid = st.selectbox("Edit student", [r["id"] for r in rows], format_func=lambda i, rows=rows: next(f"{r['ID']} — {r['Name']}" for r in rows if r["id"] == i))
         s = db.q1("SELECT * FROM students WHERE id=?", (sid,))
         with st.container(border=True):
             c1, c2, c3, c4 = st.columns(4)
@@ -153,7 +153,7 @@ with tabs[2]:
     rows = db.q("""SELECT s.id, s.code, s.name, b.code AS badge, b.status FROM students s LEFT JOIN badges b ON b.student_id=s.id AND b.status='ACTIVE'
                    WHERE s.name LIKE ? OR s.code LIKE ? ORDER BY s.code LIMIT 200""", (f"%{q2}%", f"%{q2}%"))
     if rows:
-        sid = st.selectbox("Student", [r["id"] for r in rows], format_func=lambda i: next(f"{r['code']} — {r['name']} · badge {r['badge'] or 'NONE'}" for r in rows if r["id"] == i))
+        sid = st.selectbox("Student", [r["id"] for r in rows], format_func=lambda i, rows=rows: next(f"{r['code']} — {r['name']} · badge {r['badge'] or 'NONE'}" for r in rows if r["id"] == i))
         r = next(r for r in rows if r["id"] == sid)
         hist = db.q("SELECT code AS Badge, status AS Status, issued_at AS Issued, revoked_at AS Revoked, reason AS Reason, replaced_by AS \"Replaced by\" "
                     "FROM badges WHERE student_id=? ORDER BY id DESC", (sid,))
@@ -195,7 +195,7 @@ with tabs[3]:
                    FROM buses b LEFT JOIN staff d ON d.id=b.driver_id LEFT JOIN staff s ON s.id=b.supervisor_id LEFT JOIN staff c ON c.id=b.caretaker_id
                    ORDER BY b.bus_no""")
     st.dataframe(pd.DataFrame(rows).drop(columns=["id"]), hide_index=True, width="stretch")
-    bid = st.selectbox("Edit bus", [r["id"] for r in rows], format_func=lambda i: next(r["Bus"] for r in rows if r["id"] == i))
+    bid = st.selectbox("Edit bus", [r["id"] for r in rows], format_func=lambda i, rows=rows: next(r["Bus"] for r in rows if r["id"] == i))
     b = db.bus(bid)
     c1, c2, c3, c4 = st.columns(4)
     cap = c1.number_input("Capacity", 10, 80, b["capacity"])
@@ -389,13 +389,6 @@ with tabs[9]:
             st.session_state.su_last = ("ok", " ".join(E.prepare_demo(user["username"], role)))
             st.rerun()
     with st.container(border=True):
-        st.markdown("**Reset a day** — remove all trips, scans and notices for one date (to repeat a demo)")
-        rd = st.date_input("Date to reset", value=date.fromisoformat(db.today()), key="dm_rd").isoformat()
-        if st.button("Reset this day", disabled=role != "admin"):
-            n = E.reset_day(rd, user["username"], role)
-            st.session_state.su_last = ("ok", f"{n} trip(s) removed for {rd}.")
-            st.rerun()
-    with st.container(border=True):
         st.markdown("**History** — last N school days (Sunday–Thursday)")
         nd = st.slider("Days", 1, 10, 3)
         if st.button("Simulate history"):
@@ -403,3 +396,52 @@ with tabs[9]:
                 tot = sum(E.simulate_day(day) for day in E.school_days_back(nd))
             st.session_state.su_last = ("ok", f"{tot} trip(s) simulated over {nd} day(s).")
             st.rerun()
+
+
+# ------------------------------------------------------------------ reset trip data
+with tabs[10]:
+    st.markdown("**Reset trip data** — permanently remove trips for a date so they can be run again. "
+                "Removes each trip's children list, scans, parent notices and incidents. The reset is recorded in the audit log.")
+    if role != "admin":
+        st.info("Only the administrator can reset trip data.")
+    else:
+        bl_ = db.buses()
+        r1, r2, r3 = st.columns([1, 1, 1.4])
+        rdate = r1.date_input("Date *", value=None, key="rs_date", format="YYYY/MM/DD",
+                              help="Required. Pick the date whose trips you want to reset.")
+        bopt = [None] + [b["id"] for b in bl_]
+        rbus = r2.selectbox("Bus", bopt, key="rs_bus",
+                            format_func=lambda i: "All buses" if i is None else next(b["bus_no"] for b in bl_ if b["id"] == i))
+        topt = [None] + list(TRIPS)
+        rtrip = r3.selectbox("Trip", topt, key="rs_trip",
+                             format_func=lambda n: "All trips" if n is None else f"Trip {n} · {TRIPS[n]['window'][0]}–{TRIPS[n]['window'][1]} · {TRIPS[n]['label']}")
+        if rdate is None:
+            st.warning("Select a date to continue — the date is mandatory.")
+        else:
+            D_ = rdate.isoformat()
+            runs_ = E.reset_scope(D_, rbus, rtrip)
+            pc_ = E.parent_changes_scope(D_, rbus, rtrip)
+            n_pc = len(pc_["absences"]) + len(pc_["change_requests"])
+            if not runs_:
+                st.info(f"No trips found for {D_}" + (f" · {next(b['bus_no'] for b in bl_ if b['id'] == rbus)}" if rbus else "")
+                        + (f" · Trip {rtrip}" if rtrip else "") + ". Nothing to reset.")
+            else:
+                st.markdown(f"**{len(runs_)} trip(s) will be removed:**")
+                st.dataframe(pd.DataFrame([{"Bus": r["bus_no"], "Trip": r["trip_no"], "Status": r["status"].replace("_", " ").title(),
+                                            "Started": (r["start_ts"] or "")[11:16], "Ended": (r["end_ts"] or "")[11:16],
+                                            "Children": r["children"], "On board now": r["onboard"], "Scans": r["scans"],
+                                            "Notices": r["notices"], "Incidents": r["incidents"]} for r in runs_]),
+                             hide_index=True, width="stretch")
+                if any(r["onboard"] for r in runs_):
+                    st.warning("Some of these trips still show children on board. Reset only if this is test data.")
+            also = st.checkbox(f"Also remove parent absences and change requests for this date ({n_pc} found)", value=False,
+                               key="rs_pc", disabled=n_pc == 0)
+            sure = st.checkbox("I understand this permanently deletes the selected trip data", key="rs_ok",
+                               disabled=not runs_ and not (also and n_pc))
+            if st.button("Reset trip data", type="primary", disabled=not sure or (not runs_ and not (also and n_pc)), key="rs_go"):
+                n, m = E.reset_trips(D_, user["username"], role, bus_id=rbus, trip_no=rtrip, parent_changes=also)
+                st.session_state.su_last = ("ok", f"Reset done for {D_}: {n} trip(s) removed"
+                                            + (f", {m} absence/change request(s) removed" if also else "") + ". The trip(s) can now be started again.")
+                for k_ in ("rs_ok", "rs_pc"):
+                    st.session_state.pop(k_, None)
+                st.rerun()
