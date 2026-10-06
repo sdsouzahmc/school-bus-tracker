@@ -32,7 +32,8 @@ _boot()
 st.markdown("""<style>
   :root { --navy:#1B2559; --indigo:#3D4FD6; --indigo-soft:#E9ECFC; --ink:#1A2036; --muted:#6B7390; --line:#E3E7F0;
           --green:#2E9E5B; --orange:#E07A1F; --red:#D93025; }
-  .block-container {padding-top: 1.4rem; max-width: 1400px;}
+  .block-container {padding-top: 4.2rem !important; max-width: 1400px;}
+  header[data-testid="stHeader"] {background: rgba(244,246,250,.92); backdrop-filter: blur(4px);}
   h1, h2, h3 {color: var(--ink); letter-spacing: -0.01em;}
   h1 {font-weight: 800 !important;}
   /* white rounded cards for bordered containers */
@@ -103,7 +104,7 @@ st.markdown("""<style>
 
 
 def login():
-    st.markdown("<div style='font-size:2.2rem;font-weight:800;letter-spacing:-0.02em;color:#1B2559;padding-top:1.6rem;line-height:1.3'>Auto<span style='color:#3D4FD6'>Trace</span></div>"
+    st.markdown("<div style='font-size:2.2rem;font-weight:800;letter-spacing:-0.02em;color:#1B2559;line-height:1.3'>Auto<span style='color:#3D4FD6'>Trace</span></div>"
                 f"<div style='font-size:1.25rem;font-weight:700;margin-top:-4px'>{t('School Bus Tracker')}</div>", unsafe_allow_html=True)
     st.caption(db.setting("school_name", db.SCHOOL_NAME) + " · " + db.setting("data_source", ""))
     c1, c2 = st.columns([1, 1])
