@@ -29,6 +29,7 @@ def _boot():
     db.x("UPDATE staff SET name='Dispatcher' WHERE name='Dispatcher Demo'")
     db.x("UPDATE users SET display_name=REPLACE(display_name,' Demo','') WHERE display_name LIKE '% Demo%'")
     db.x("UPDATE users SET display_name='Dispatcher' WHERE display_name='Dispatcher Demo'")
+    db.x("UPDATE stops SET name=REPLACE(name,' demo','') WHERE name LIKE '% demo%'")
     db.x("UPDATE trip_runs SET sweep_by=REPLACE(sweep_by,' Demo','') WHERE sweep_by LIKE '% Demo%'")
     db.x("UPDATE manifest SET received_by=REPLACE(received_by,' Demo','') WHERE received_by LIKE '% Demo%'")
     if "demo" in (db.setting("school_name", "") or "").lower():

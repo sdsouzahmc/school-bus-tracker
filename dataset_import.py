@@ -149,6 +149,9 @@ def load(data, source_name="School_Bus_Trip_Dataset.xlsx", shift_to_past=True):
     con = db.connect()
     try:
         c = con.cursor()
+        for x in data["Locations"]:
+            if x["Location_Type"] != "School":
+                x["Location_Name"] = str(x["Location_Name"]).replace(" demo", "").replace(" Demo", "")
         for x in data["Crew"]:
             x["Crew_Name"] = str(x["Crew_Name"]).replace(" Demo", "")
         school = next(r for r in data["Locations"] if r["Location_Type"] == "School")
