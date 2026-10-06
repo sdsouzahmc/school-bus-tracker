@@ -11,7 +11,7 @@ from ui import msg
 
 user = st.session_state.user
 role = user["role"]
-st.title("🚨 Exceptions & approvals")
+st.title("Incidents & approvals")
 if "ex_last" in st.session_state:
     msg(*st.session_state.pop("ex_last"))
 
