@@ -110,6 +110,13 @@ st.markdown("""<style>
   .bc .ends{display:flex;justify-content:space-between;font-size:.72rem;color:var(--muted)}
   .bc .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:10px}
   .bc .l{font-size:.72rem;color:var(--muted)} .bc .v{font-size:.86rem;font-weight:600;color:var(--ink)}
+  .crewcnt{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:6px 0 10px}
+  .crewcnt div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 10px;text-align:center}
+  .crewcnt b{display:block;font-size:1.6rem;line-height:1.1} .crewcnt span{font-size:.72rem;color:var(--muted)}
+  @media (max-width: 640px){ h1{font-size:1.7rem !important} h3{font-size:1.15rem !important} .block-container{padding-left:.8rem;padding-right:.8rem} }
+  /* touch-friendly buttons */
+  div[data-testid='stPills'] button, div[data-testid='stButtonGroup'] button{min-height:44px;padding:8px 14px;font-size:.98rem}
+  div[data-testid='stButton'] button{min-height:44px}
   .bc.flat{border:none;box-shadow:none;padding:2px 2px 6px} .bc.closed .prog .f{background:#9ED3B0} .bc.closed .prog .k{background:var(--green)}
 """ + rtl_css(), unsafe_allow_html=True)
 

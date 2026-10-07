@@ -123,7 +123,11 @@ if not run:
     st.divider()
     st.subheader("▶ " + t("Start trip"))
     avail = [n for n in TRIPS if n not in runs_today] or [default_trip]
-    trip_no = st.selectbox(t("Trip"), avail, index=avail.index(default_trip) if default_trip in avail else 0, format_func=lambda n: f"Trip {n} · {TRIPS[n]['window'][0]}–{TRIPS[n]['window'][1]} · {TRIPS[n]['label']}")
+    st.markdown("**" + t("Which trip are you starting?") + "**")
+    trip_no = st.pills(t("Trip"), avail, default=default_trip if default_trip in avail else avail[0], key=f"{K}_trip_p",
+                       format_func=lambda n: f"Trip {n} · {TRIPS[n]['window'][0]}–{TRIPS[n]['window'][1]}", label_visibility="collapsed") \
+        or (default_trip if default_trip in avail else avail[0])
+    st.markdown(f"<span class='pill'>{TRIPS[trip_no]['label']}</span>", unsafe_allow_html=True)
     if not E.in_window(trip_no, db.now()):
         st.caption(f"ℹ Outside the scheduled window ({TRIPS[trip_no]['window'][0]}–{TRIPS[trip_no]['window'][1]}). It will show on the punctuality report.")
 
@@ -133,12 +137,10 @@ if not run:
         return st.selectbox(label, ids, index=ids.index(default) if default in ids else 0,
                             format_func=lambda i: next(o["name"] for o in opts if o["id"] == i), key=f"{K}_{r}")
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
+    with st.expander(f"👥 {t('Crew')}: {db.staff_name(bus['driver_id'])} · {db.staff_name(bus['supervisor_id'])} · "
+                     f"{db.staff_name(bus['caretaker_id'])} — {t('tap to change')}"):
         d_id = crew_pick(t("Driver"), "driver", bus["driver_id"])
-    with c2:
         s_id = crew_pick(t("Supervisor"), "supervisor", bus["supervisor_id"])
-    with c3:
         c_id = crew_pick(t("Care-taker"), "caretaker", bus["caretaker_id"])
     conf = st.checkbox(t("Confirm crew on board"), key=f"{K}_conf")
     if st.button("▶ " + t("Start trip"), type="primary", disabled=not conf or offline, width="stretch"):
@@ -161,11 +163,11 @@ if _th2.button("🔄 " + t("Refresh"), key=f"{K}_refresh_top", width="stretch",
     st.rerun()
 st.caption(f"Started {run['start_ts'][11:16]} by {run['started_by']} · crew: {db.staff_name(run['driver_id'])} / {db.staff_name(run['supervisor_id'])} / "
            f"{db.staff_name(run['caretaker_id'])}" + (" · 📴 OFFLINE" if offline else ""))
-m1, m2, m3, m4 = st.columns(4)
-m1.metric(t("On board"), cnt.get("ONBOARD", 0) + cnt.get("TRANSFER_PENDING", 0))
-m2.metric(t("Expected"), cnt.get("EXPECTED", 0))
-m3.metric(t("Completed"), cnt.get("COMPLETED", 0) + cnt.get("RETURNED", 0))
-m4.metric("Absent / no-show", cnt.get("ABSENT_DECLARED", 0) + cnt.get("NO_SHOW", 0))
+_cn = [(t("On board"), cnt.get("ONBOARD", 0) + cnt.get("TRANSFER_PENDING", 0), "#2E9E5B"), (t("Expected"), cnt.get("EXPECTED", 0), "#E07A1F"),
+       (t("Completed"), cnt.get("COMPLETED", 0) + cnt.get("RETURNED", 0), "#3D4FD6"),
+       (t("Absent"), cnt.get("ABSENT_DECLARED", 0) + cnt.get("NO_SHOW", 0), "#6B7390")]
+st.markdown("<div class='crewcnt'>" + "".join(f"<div><b style='color:{c}'>{v}</b><span>{l}</span></div>" for l, v, c in _cn) + "</div>",
+            unsafe_allow_html=True)
 
 if not is_driver and not closed_local and not db.q1("SELECT id FROM events WHERE run_id=? AND result<>'REJECTED' "
                                                      "AND kind IN ('CHECK_IN','CHECK_OUT') LIMIT 1", (run["id"],)):
@@ -184,6 +186,47 @@ if closed_local:
 
 if f"{K}_last" in st.session_state:
     msg(*st.session_state[f"{K}_last"])
+
+
+def stop_work(lines, stops):
+    """Per stop: children to board (on) and to get off / hand over (off) still outstanding."""
+    w = {}
+    for s_ in stops:
+        sid_ = s_["id"]
+        if sid_ == SCHOOL_STOP:
+            on = sum(1 for ln in lines if ln["purpose"] == "DROPOFF" and ln["status"] == "EXPECTED")
+            off = sum(1 for ln in lines if ln["purpose"] == "PICKUP" and ln["status"] == "ONBOARD")
+        else:
+            on = sum(1 for ln in lines if ln["purpose"] == "PICKUP" and ln["status"] == "EXPECTED" and ln["stop_id"] == sid_)
+            off = sum(1 for ln in lines if ln["purpose"] == "DROPOFF" and ln["status"] == "ONBOARD" and ln["stop_id"] == sid_)
+        w[sid_] = {"on": on, "off": off, "any": bool(on or off)}
+    return w
+
+
+def next_stop(lines, stops, work):
+    """Suggested next stop: board drop-off children at school first, then route stops in order, then school hand-over."""
+    if work[SCHOOL_STOP]["on"]:
+        return SCHOOL_STOP
+    for s_ in stops:
+        if s_["id"] != SCHOOL_STOP and work[s_["id"]]["any"]:
+            return s_["id"]
+    if work[SCHOOL_STOP]["off"]:
+        return SCHOOL_STOP
+    return None
+
+
+def suggest_action(stop_id, work):
+    w = work.get(stop_id, {"on": 0, "off": 0})
+    return t("Check Out") if w["off"] and not (stop_id == SCHOOL_STOP and w["on"]) else t("Check In")
+
+
+def _work_text(w):
+    parts = []
+    if w["off"]:
+        parts.append(f"⬇ {w['off']} {t('to get off')}")
+    if w["on"]:
+        parts.append(f"⬆ {w['on']} {t('to board')}")
+    return " · ".join(parts) or t("nothing to do here")
 
 
 def submit(kind, badge=None, sid=None, method="QR", extra=None, ctx=None):
@@ -214,9 +257,49 @@ def submit(kind, badge=None, sid=None, method="QR", extra=None, ctx=None):
 
 if not is_driver:
     stops = [{"id": SCHOOL_STOP, "name": t("School")}] + db.stops_of_bus(bus_id)
-    c1, c2 = st.columns([2, 1])
-    c1.selectbox(t("Current stop"), [s["id"] for s in stops], format_func=lambda i: next(s["name"] for s in stops if s["id"] == i), key=f"{K}_stop")
-    action = c2.radio(t("Action"), [t("Check In"), t("Check Out")], horizontal=True, key=f"{K}_act")
+    work = stop_work(lines, stops)
+    nxt = next_stop(lines, stops, work)
+    if f"{K}_stop" not in st.session_state:
+        st.session_state[f"{K}_stop"] = nxt or SCHOOL_STOP
+    if f"{K}_act" not in st.session_state:
+        st.session_state[f"{K}_act"] = suggest_action(st.session_state[f"{K}_stop"], work)
+    st.session_state[f"{K}_stopp"] = st.session_state[f"{K}_stop"]
+    _c = st.session_state[f"{K}_stop"]
+    _sig = (_c, work[_c]["off"], work[_c]["on"])
+    if st.session_state.get(f"{K}_worksig") not in (None, _sig) and st.session_state.get(f"{K}_worksig")[0] == _c:
+        # counts at this stop changed (a scan landed): flip the action when one direction is finished
+        if work[_c]["off"] == 0 and work[_c]["on"]:
+            st.session_state[f"{K}_act"] = t("Check In")
+        elif work[_c]["on"] == 0 and work[_c]["off"]:
+            st.session_state[f"{K}_act"] = t("Check Out")
+    st.session_state[f"{K}_worksig"] = _sig
+
+    def _go(stop_id):
+        st.session_state[f"{K}_stop"] = stop_id
+        st.session_state[f"{K}_act"] = suggest_action(stop_id, work)
+
+    def _pick_stop():
+        v = st.session_state.get(f"{K}_stopp")
+        if v is not None:
+            _go(v)
+
+    cur = st.session_state[f"{K}_stop"]
+    name_of = {s["id"]: s["name"] for s in stops}
+    with st.container(border=True):
+        if nxt is None:
+            st.markdown(f"✅ **{t('All stops done')}** — {t('sweep the bus and close the trip below.')}")
+        elif nxt != cur:
+            w = work[nxt]
+            pc1, pc2 = st.columns([3, 2], vertical_alignment="center")
+            pc1.markdown(f"👉 **{t('Next stop')}: {name_of[nxt]}** — " + _work_text(w))
+            pc2.button(f"➡ {t('Go to')} {name_of[nxt]}", type="primary", width="stretch", on_click=_go, args=(nxt,), key=f"{K}_gonext")
+        else:
+            st.markdown(f"📍 **{t('You are at')} {name_of[cur]}** — " + (_work_text(work[cur]) if work[cur]["any"] else t("nothing to do here")))
+        st.pills(t("Current stop"), [s["id"] for s in stops], key=f"{K}_stopp", on_change=_pick_stop,
+                 format_func=lambda i: f"{'✓ ' if not work[i]['any'] else ''}{name_of[i]}" + (f"  ↓{work[i]['off']}" if work[i]["off"] else "")
+                 + (f"  ↑{work[i]['on']}" if work[i]["on"] else ""))
+        action = st.segmented_control(t("Action"), [t("Check In"), t("Check Out")], key=f"{K}_act", width="stretch",
+                                      format_func=lambda a: ("⬆ " if a == t("Check In") else "⬇ ") + a) or t("Check In")
     kind = "CHECK_IN" if action == t("Check In") else "CHECK_OUT"
 
     pend = st.session_state.get(f"{K}_pending")
@@ -234,7 +317,7 @@ if not is_driver:
             elif pend["needs"] == "receiver":
                 st.markdown("**" + t("Received by (school staff)") + "**")
                 rec = [r["name"] for r in db.q("SELECT name FROM staff WHERE role='receiving' ORDER BY name")]
-                pick = st.selectbox("Receiver", rec, label_visibility="collapsed", key=f"{K}_rcv")
+                pick = st.pills("Receiver", rec, default=rec[0] if rec else None, label_visibility="collapsed", key=f"{K}_rcv") or (rec[0] if rec else None)
                 if st.button(t("Confirm handover"), type="primary"):
                     submit(pend["kind"], pend["badge"], pend["sid"], ctx=pend["ctx"], extra={"received_by": pick})
                     st.rerun()
@@ -282,10 +365,11 @@ if not is_driver:
         for s in allst:
             opts.setdefault(s["id"], f"{s['name']} ({s['code']}) — not on this list")
         sid = st.selectbox(t("Student"), list(opts), format_func=opts.get, index=None, placeholder="Search name…", key=f"{K}_mansid")
-        c1, c2 = st.columns(2)
-        why = c1.selectbox(t("Reason"), ["Badge forgotten", "Badge damaged / unreadable", "Camera / reader fault", "Paper roster entry"], key=f"{K}_manwhy")
+        _why_opts = ["Badge forgotten", "Badge damaged / unreadable", "Camera / reader fault", "Paper roster entry"]
+        why = st.pills(t("Reason"), _why_opts, default=_why_opts[0], key=f"{K}_manwhy") or _why_opts[0]
         crew_names = [db.staff_name(run["supervisor_id"]), db.staff_name(run["caretaker_id"]), db.staff_name(run["driver_id"])]
-        ver = c2.selectbox(t("Verified by"), [n for n in crew_names if n and n != user["display_name"]] or crew_names, key=f"{K}_manver")
+        _ver_opts = [n for n in crew_names if n and n != user["display_name"]] or crew_names
+        ver = st.pills(t("Verified by"), _ver_opts, default=_ver_opts[0], key=f"{K}_manver") or _ver_opts[0]
         if st.button(t("Submit"), disabled=sid is None, key=f"{K}_mango"):
             submit(kind, sid=sid, method="MANUAL", extra={"manual_reason": why, "verified_by": ver})
             st.rerun()
@@ -297,10 +381,9 @@ if not is_driver and _arrive and cur_stop == SCHOOL_STOP:
         st.markdown(f"**🏫 Arrived at school — hand over {len(_arrive)} pickup child(ren) to receiving staff**")
         st.caption("Records a separate school check-out for every child, with the receiving staff member's name. "
                    "Children still on a drop-off route are not affected.")
-        c1, c2 = st.columns([2, 1])
         _rcv = [r["name"] for r in db.q("SELECT name FROM staff WHERE role='receiving' ORDER BY name")]
-        _who = c1.selectbox(t("Received by (school staff)"), _rcv, key=f"{K}_bulkrcv")
-        if c2.button(f"✅ Hand over all {len(_arrive)}", type="primary", key=f"{K}_bulkgo"):
+        _who = st.pills(t("Received by (school staff)"), _rcv, default=_rcv[0] if _rcv else None, key=f"{K}_bulkrcv") or (_rcv[0] if _rcv else None)
+        if st.button(f"✅ Hand over all {len(_arrive)}", type="primary", key=f"{K}_bulkgo", width="stretch"):
             _ok = 0
             for ln in _arrive:
                 _ctx = {"operator": user["display_name"], "role": role, "device_id": dev_id, "stop_id": SCHOOL_STOP, "method": "GROUP_HANDOVER",
@@ -365,10 +448,11 @@ def _lists_panel():
         lines_table(sorted(ex, key=lambda ln: (ln not in here, ln["stop_seq"] or 0)), ("name", "class", "purpose", "stop_name"),
                     highlight={ln["id"] for ln in here})
         if ex and not is_driver:
-            ns = st.selectbox(t("Mark no-show"), [ln["student_id"] for ln in ex], index=None, placeholder="Child did not come…",
-                              format_func=lambda i: next(f"{ln['name']} · {ln['stop_name'] or t('School')}" for ln in ex if ln["student_id"] == i),
-                              key=f"{K}_ns")
-            if st.button(t("Mark no-show"), disabled=ns is None):
+            _cand = here or ex
+            st.markdown("**" + t("Mark no-show") + "**" + (f" — {t('children expected at this stop')}" if here else ""))
+            ns = st.pills(t("Mark no-show"), [ln["student_id"] for ln in _cand[:15]], key=f"{K}_ns", label_visibility="collapsed",
+                          format_func=lambda i: next(ln["name"] for ln in _cand if ln["student_id"] == i))
+            if st.button("🚫 " + t("Mark no-show"), disabled=ns is None, width="stretch", key=f"{K}_nsgo"):
                 submit("NO_SHOW", sid=ns, method="CREW")
                 st.rerun()
 
@@ -400,9 +484,9 @@ if bl:
         + ", ".join(f"{ln['name']} ({status_text(ln['status'])})" for ln in bl[:12]) + (" …" if len(bl) > 12 else ""))
     st.caption("Check out, mark no-show, return to school, or ask the office to decide pending transfers.")
 crew_names = {run["supervisor_id"]: db.staff_name(run["supervisor_id"]), run["caretaker_id"]: db.staff_name(run["caretaker_id"])}
-c1, c2 = st.columns(2)
-sweeper = c1.selectbox(t("Physical sweep done by"), list(crew_names.values()), key=f"{K}_sweep")
-swept = c2.checkbox(t("I walked the full bus and checked every seat"), key=f"{K}_swept")
+_sw_opts = list(dict.fromkeys(n for n in crew_names.values() if n))
+sweeper = st.pills(t("Physical sweep done by"), _sw_opts, default=_sw_opts[-1] if _sw_opts else None, key=f"{K}_sweep") or (_sw_opts[-1] if _sw_opts else None)
+swept = st.checkbox(t("I walked the full bus and checked every seat"), key=f"{K}_swept")
 with st.expander("Final crew (change only if crew changed during the trip)"):
     f1, f2, f3 = st.columns(3)
 
