@@ -293,6 +293,52 @@ def open_incident(kind, severity, details, run_id=None, bus_id=None, student_id=
              (ts(when), run_id, bus_id, student_id, kind, severity, details, "OPEN"), con)
 
 
+# ------------------------------------------------------------------ office <-> bus: messages and SOS
+SOS_TYPES = ["Medical", "Accident", "Breakdown", "Security / threat", "Child missing", "Other"]
+
+
+def _ensure_comms(con=None):
+    x("""CREATE TABLE IF NOT EXISTS bus_messages (id INTEGER PRIMARY KEY, ts TEXT, bus_id INTEGER, run_id INTEGER, sender TEXT,
+         text TEXT, ack_ts TEXT, ack_by TEXT)""", (), con)
+
+
+def send_bus_message(bus_id, run_id, text, sender, role):
+    """Office -> bus message; shown on the crew and driver screens until a crew member acknowledges it."""
+    with db.tx() as c:
+        _ensure_comms(c)
+        mid = x("INSERT INTO bus_messages(ts, bus_id, run_id, sender, text) VALUES (?,?,?,?,?)", (ts(), bus_id, run_id, sender, text), c)
+        db.audit(sender, role, "BUS_MESSAGE", "bus", bus_id, text, c)
+        return mid
+
+
+def bus_messages(bus_id, only_open=False, limit=20):
+    _ensure_comms()
+    return q("SELECT * FROM bus_messages WHERE bus_id=?" + (" AND ack_ts IS NULL" if only_open else "") + " ORDER BY id DESC LIMIT ?",
+             (bus_id, limit))
+
+
+def ack_bus_message(msg_id, username, role):
+    with db.tx() as c:
+        _ensure_comms(c)
+        c.execute("UPDATE bus_messages SET ack_ts=?, ack_by=? WHERE id=? AND ack_ts IS NULL", (ts(), username, msg_id))
+        db.audit(username, role, "BUS_MESSAGE_ACK", "bus_message", msg_id, "", c)
+
+
+def raise_sos(bus_id, run_id, sos_type, note, username, role, lat=None, lon=None):
+    """Crew emergency: opens a CRITICAL incident (top of Live trips, Overview and Incidents) with the bus position."""
+    b = db.bus(bus_id)
+    where = f" · GPS {lat:.5f}, {lon:.5f}" if lat is not None else " · GPS unavailable"
+    with db.tx() as c:
+        iid = open_incident("SOS", "CRITICAL", f"SOS {sos_type} on {b['bus_no']} raised by {username}" + (f": {note}" if note else "") + where,
+                            run_id=run_id, bus_id=bus_id, con=c)
+        db.audit(username, role, "SOS", "incident", iid, f"{b['bus_no']} {sos_type} {note}", c)
+        return iid
+
+
+def open_sos(bus_id):
+    return q("SELECT * FROM incidents WHERE bus_id=? AND kind='SOS' AND status<>'RESOLVED' ORDER BY id DESC", (bus_id,))
+
+
 # ------------------------------------------------------------------ scans
 def allowed_recipients(student_id, date, trip_no, con=None):
     rec = [{"name": r["name"], "relation": r["relation"], "phone": r["phone"], "source": "Authorized"}

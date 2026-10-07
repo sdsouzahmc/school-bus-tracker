@@ -13,7 +13,7 @@ from db import SCHOOL_STOP, TRIPS
 from i18n import t
 from qr_utils import decode_qr
 from qr_scanner import qr_scanner
-from ui import gps_fix, lines_table, msg, status_text
+from ui import alert_sound, gps_fix, lines_table, msg, status_text
 
 user = st.session_state.user
 role = user["role"]
@@ -83,6 +83,41 @@ def replica(run_id, items, extra=None):
 # ------------------------------------------------------------------ no open trip: today's list + start
 run = E.open_run(bus_id)
 closed_local = run and any(it["type"] == "close" and it["run_id"] == run["id"] for it in queue)
+
+# ------------------------------------------------------------------ office messages + SOS (all crew, any time)
+@st.fragment(run_every=15)
+def _comms():
+    msgs = E.bus_messages(bus_id, only_open=True)
+    seen = st.session_state.setdefault(f"{K}_seenmsg", set())
+    new = [m_ for m_ in msgs if m_["id"] not in seen]
+    if new:
+        alert_sound("Message from the office. " + new[0]["text"], key=f"{K}_msnd{new[0]['id']}")
+        seen.update(m_["id"] for m_ in new)
+    for m_ in msgs:
+        c1, c2 = st.columns([4, 1], vertical_alignment="center")
+        c1.markdown(f"<div class='warn'>✉️ <b>{t('Message from office')}</b> · {m_['ts'][11:16]} · {m_['sender']}<br>{m_['text']}</div>",
+                    unsafe_allow_html=True)
+        if not is_driver and c2.button("✓ " + t("Acknowledge"), key=f"{K}_ack{m_['id']}", width="stretch", type="primary"):
+            E.ack_bus_message(m_["id"], user["username"], role)
+            st.rerun()
+    for s_ in E.open_sos(bus_id):
+        st.markdown(f"<div class='error'>🆘 <b>SOS sent {s_['ts'][11:16]}</b> — {t('the office has been alerted')}. {s_['details']}</div>",
+                    unsafe_allow_html=True)
+
+
+_comms()
+with st.popover("🆘 SOS — " + t("Emergency"), width="stretch", type="primary"):
+    st.markdown("**" + t("Send an emergency alert to the transport office") + "**")
+    _sos_t = st.pills(t("Type"), E.SOS_TYPES, default="Medical", key=f"{K}_sostype") or "Other"
+    _sos_n = st.text_input(t("Details (optional)"), key=f"{K}_sosnote", placeholder="e.g. child unwell, bus stopped at …")
+    if offline:
+        st.error("No network on this device — call the transport office directly.")
+    if st.button("🆘 " + t("Send SOS now"), type="primary", width="stretch", key=f"{K}_sosgo", disabled=offline):
+        _g = gps_fix(st.session_state.get(f"{K}_stop", SCHOOL_STOP), gps_off)
+        E.raise_sos(bus_id, run["id"] if run else None, _sos_t, _sos_n.strip(), user["display_name"], role,
+                    _g["lat"] if _g["gps_ok"] else None, _g["lon"] if _g["gps_ok"] else None)
+        st.session_state[f"{K}_last"] = ("error", f"🆘 SOS ({_sos_t}) sent — the transport office has been alerted with your location.")
+        st.rerun()
 
 if f"{K}_last" in st.session_state and not run:
     msg(*st.session_state.pop(f"{K}_last"))
@@ -254,6 +289,35 @@ def submit(kind, badge=None, sid=None, method="QR", extra=None, ctx=None):
         st.session_state[f"{K}_pending"] = {"kind": kind, "badge": badge, "sid": sid, "ctx": ctx, "needs": "capacity"}
     st.session_state[f"{K}_last"] = (res["level"], res["message"])
 
+
+if is_driver:
+    @st.fragment(run_every=10)
+    def _driver_next():
+        _l = replica(run["id"], dstore.load_queue(dev_id))[1] if dev_id and dstore.load_queue(dev_id) else E.run_lines(run["id"])
+        _stops = [{"id": SCHOOL_STOP, "name": t("School")}] + db.stops_of_bus(bus_id)
+        _w = stop_work(_l, _stops)
+        _n = next_stop(_l, _stops, _w)
+        _name = {s_["id"]: s_["name"] for s_ in _stops}
+        if _n is None:
+            big, sub, col = t("Back to school / trip complete"), t("All stops done"), "#2E9E5B"
+        else:
+            big, sub, col = _name[_n], _work_text(_w[_n]), "#3D4FD6"
+        st.markdown(f"""<div style='background:{col};color:#fff;border-radius:16px;padding:18px 20px;margin:6px 0 12px'>
+<div style='font-size:.9rem;opacity:.85;letter-spacing:.06em'>{t('NEXT STOP')}</div>
+<div style='font-size:2.2rem;font-weight:800;line-height:1.15'>{big}</div>
+<div style='font-size:1.1rem;margin-top:4px'>{sub}</div></div>""", unsafe_allow_html=True)
+        _order = ([SCHOOL_STOP] if _w[SCHOOL_STOP]["on"] else []) + \
+                 [s_["id"] for s_ in _stops if s_["id"] != SCHOOL_STOP and _w[s_["id"]]["any"]] + \
+                 ([SCHOOL_STOP] if _w[SCHOOL_STOP]["off"] else [])
+        _after = [i for i in _order if i != _n] if _order and _order[0] == _n else [i for i in _order if i != _n]
+        if _after:
+            st.caption(t("Then") + ": " + " → ".join(_name[i] for i in dict.fromkeys(_after)))
+        if st.session_state.get(f"{K}_drvnext", "init") != _n:
+            if st.session_state.get(f"{K}_drvnext", "init") != "init":
+                alert_sound(f"Next stop, {big}" if _n is not None else "All stops done", key=f"{K}_dsnd{_n}")
+            st.session_state[f"{K}_drvnext"] = _n
+
+    _driver_next()
 
 if not is_driver:
     stops = [{"id": SCHOOL_STOP, "name": t("School")}] + db.stops_of_bus(bus_id)

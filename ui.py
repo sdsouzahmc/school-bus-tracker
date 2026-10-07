@@ -6,6 +6,7 @@ import pydeck as pdk
 import streamlit as st
 
 import db
+import engine as E_
 from engine import STATUS_LABEL
 from i18n import t
 
@@ -146,7 +147,10 @@ def trip_info(r):
 
 def _card_html(r, k):
     b = k["bus"]
-    if k["closed"]:
+    sos = db.q1("SELECT ts FROM incidents WHERE bus_id=? AND kind='SOS' AND status<>'RESOLVED' ORDER BY id DESC LIMIT 1", (r["bus_id"],))
+    if sos:
+        pill = f"<span class='pill red'>🆘 SOS {sos['ts'][11:16]}</span>"
+    elif k["closed"]:
         pill = f"<span class='pill green'>Closed {(r['end_ts'] or '')[11:16]}</span>"
     elif k["offline"]:
         pill = "<span class='pill orange'>Offline</span>"
@@ -179,6 +183,11 @@ def bus_cards(runs, key="bc", per_row=3):
                     locate_dialog(r["id"])
                 if b2.button("Students", key=f"{key}_stu_{r['id']}", width="stretch", icon=":material/group:"):
                     students_dialog(r["id"])
+                if not k["closed"]:
+                    n_open = len([m_ for m_ in E_.bus_messages(r["bus_id"], only_open=True)])
+                    if st.button("Message bus" + (f" ({n_open} unread)" if n_open else ""), key=f"{key}_msg_{r['id']}", width="stretch",
+                                 icon=":material/campaign:"):
+                        message_dialog(r["id"])
 
 
 def run_position(r):
@@ -259,3 +268,48 @@ def students_dialog(run_id):
 
 def staff_name(i):
     return db.staff_name(i) or "—"
+
+
+def alert_sound(say=None, key="snd"):
+    """Short beep (and optional spoken text) in the browser — used for new office messages and the driver's next stop."""
+    import json
+    say_js = json.dumps(say or "").replace("</", "<\\/")
+    js = f"""<html><body style='margin:0'><script>
+try {{
+  const C = window.parent.AudioContext || window.parent.webkitAudioContext || AudioContext;
+  const a = new C(); const o = a.createOscillator(); const g = a.createGain();
+  o.type = 'sine'; o.frequency.value = 880; o.connect(g); g.connect(a.destination);
+  g.gain.setValueAtTime(0.25, a.currentTime); o.start(); o.stop(a.currentTime + 0.35);
+}} catch (e) {{}}
+try {{
+  const txt = {say_js};
+  if (txt && window.parent.speechSynthesis) {{ const u = new SpeechSynthesisUtterance(txt); u.rate = 0.95; window.parent.speechSynthesis.speak(u); }}
+}} catch (e) {{}}
+</script></body></html>"""
+    st.iframe(js, height=1)
+
+
+QUICK_MSGS = ["Please call the transport office now", "Traffic on your route — expect a delay, parents informed",
+              "Wait at the stop: a parent is on the way", "Return to school with all children on board",
+              "Change of route: follow the office instructions by phone"]
+
+
+@st.dialog("Message bus", width="large")
+def message_dialog(run_id):
+    E = E_
+    r = db.q1("SELECT * FROM trip_runs WHERE id=?", (run_id,))
+    b = db.bus(r["bus_id"])
+    st.markdown(f"### {b['bus_no']} · Trip {r['trip_no']}")
+    st.caption("The message appears on the crew and driver screens with a sound alert, until a crew member taps Acknowledge.")
+    quick = st.pills("Quick messages", QUICK_MSGS, key=f"qm_{run_id}")
+    text = st.text_area("Message", value=quick or "", key=f"mt_{run_id}_{quick or ''}", max_chars=300)
+    if st.button("Send to bus", type="primary", icon=":material/send:", disabled=not text.strip(), key=f"ms_{run_id}"):
+        u_ = st.session_state.user
+        E.send_bus_message(b["id"], run_id, text.strip(), u_["display_name"], u_["role"])
+        st.success(f"Sent to {b['bus_no']}.")
+    hist = E.bus_messages(b["id"], limit=10)
+    if hist:
+        st.markdown("**Recent messages**")
+        st.dataframe(pd.DataFrame([{"Sent": h["ts"][11:16], "From": h["sender"], "Message": h["text"],
+                                    "Acknowledged": f"{h['ack_ts'][11:16]} by {h['ack_by']}" if h["ack_ts"] else "⏳ not yet"} for h in hist]),
+                     hide_index=True, width="stretch")

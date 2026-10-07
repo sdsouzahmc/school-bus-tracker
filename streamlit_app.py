@@ -114,6 +114,7 @@ st.markdown("""<style>
   .crewcnt div{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 10px;text-align:center}
   .crewcnt b{display:block;font-size:1.6rem;line-height:1.1} .crewcnt span{font-size:.72rem;color:var(--muted)}
   @media (max-width: 640px){ h1{font-size:1.7rem !important} h3{font-size:1.15rem !important} .block-container{padding-left:.8rem;padding-right:.8rem} }
+  div[data-testid='stPopover'] button[kind='primary']{background:#D93025 !important;border-color:#D93025 !important;color:#fff !important;font-weight:700}
   /* touch-friendly buttons */
   div[data-testid='stPills'] button, div[data-testid='stButtonGroup'] button{min-height:44px;padding:8px 14px;font-size:.98rem}
   div[data-testid='stButton'] button{min-height:44px}
