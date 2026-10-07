@@ -40,16 +40,26 @@ def board():
     for h in hi:
         st.markdown(f"<div class='error'>🚨 <b>{h['kind'].replace('_', ' ')}</b> · {h['bus_no'] or ''} · {h['ts'][:16]} — {h['details']}</div>",
                     unsafe_allow_html=True)
-    open_runs = db.q("SELECT * FROM trip_runs WHERE date=? AND status IN ('IN_PROGRESS','PENDING_SYNC') ORDER BY bus_id", (D,))
-    if open_runs:
-        nonb = db.q1(f"SELECT COUNT(*) n FROM manifest WHERE status IN ('ONBOARD','TRANSFER_PENDING') AND run_id IN ({','.join('?' * len(open_runs))})",
-                     [r["id"] for r in open_runs])["n"]
-        noff = sum(r["status"] == "PENDING_SYNC" for r in open_runs)
-        st.markdown(f"<span class='pill' style='padding:6px 12px'>{len(open_runs) - noff} moving</span> "
-                    f"<span class='pill orange' style='padding:6px 12px'>{noff} offline</span> "
-                    f"<span class='pill grey' style='padding:6px 12px;background:#fff;border:1px solid #E3E7F0'>{nonb} students onboard</span>",
+    day_runs = db.q("""SELECT r.* FROM trip_runs r JOIN buses b ON b.id=r.bus_id WHERE r.date=? AND r.status IN ('IN_PROGRESS','PENDING_SYNC','CLOSED')
+                       ORDER BY r.status='CLOSED', r.trip_no, b.bus_no""", (D,))
+    if day_runs:
+        moving = [r for r in day_runs if r["status"] == "IN_PROGRESS"]
+        offline = [r for r in day_runs if r["status"] == "PENDING_SYNC"]
+        closed = [r for r in day_runs if r["status"] == "CLOSED"]
+        open_ids = [r["id"] for r in moving + offline]
+        nonb = db.q1(f"SELECT COUNT(*) n FROM manifest WHERE status IN ('ONBOARD','TRANSFER_PENDING') AND run_id IN ({','.join('?' * len(open_ids))})",
+                     open_ids)["n"] if open_ids else 0
+        opts = {"All": day_runs, "Moving": moving, "Offline": offline, "Closed": closed}
+        f1, f2 = st.columns([3, 1], vertical_alignment="center")
+        pick = f1.segmented_control("Show trips", list(opts), default="All", key="live_filter", label_visibility="collapsed",
+                                   format_func=lambda o: f"{o} ({len(opts[o])})")
+        f2.markdown(f"<span class='pill grey' style='padding:6px 12px;background:#fff;border:1px solid #E3E7F0'>{nonb} students onboard</span>",
                     unsafe_allow_html=True)
-        bus_cards(open_runs)
+        shown = opts.get(pick or "All", day_runs)
+        if shown:
+            bus_cards(shown, key="live")
+        else:
+            st.caption("No trips in this group.")
         st.write("")
     pos = bus_positions(D)
     stops = [{"lat": s["lat"], "lon": s["lon"], "name": s["name"]} for s in db.q("SELECT name, lat, lon FROM stops")]

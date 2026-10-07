@@ -93,6 +93,9 @@ def lines_table(lines, cols=("name", "class", "batch", "grp", "purpose", "stop_n
         df["purpose"] = df["purpose"].map(lambda v: t((v or "").title()))
     if "stop_name" in df:
         df["stop_name"] = df["stop_name"].fillna(t("School"))
+    for c in ("recipient_name", "received_by", "handover", "note"):
+        if c in df:
+            df[c] = df[c].fillna("—")
     df = df.rename(columns=names)
     if hl and any(mark):
         df.insert(0, " ", ["📍" if m else "" for m in mark])
@@ -102,48 +105,156 @@ def lines_table(lines, cols=("name", "class", "batch", "grp", "purpose", "stop_n
         st.dataframe(df, hide_index=True, width="stretch")
 
 
-def bus_cards(runs):
-    """Live trip cards (one per open trip): route progress, movement, on board / capacity, crew, next stop."""
-    cards = []
-    for r in runs:
-        b = db.bus(r["bus_id"])
-        lines = db.q("""SELECT m.*, st.name AS stop_name, st.seq FROM manifest m LEFT JOIN stops st ON st.id=m.stop_id WHERE m.run_id=?""", (r["id"],))
-        total = len(lines) or 1
-        done = sum(1 for ln in lines if ln["status"] not in ("EXPECTED", "ONBOARD", "TRANSFER_PENDING"))
-        frac = done / total
-        onb = sum(1 for ln in lines if ln["status"] in ("ONBOARD", "TRANSFER_PENDING"))
-        exp_ = sum(1 for ln in lines if ln["status"] == "EXPECTED")   # still to board on this trip
-        purposes = {ln["purpose"] for ln in lines}
-        kind = "Pickup" if purposes == {"PICKUP"} else ("Drop-off" if purposes == {"DROPOFF"} else "Drop-off + pickup")
-        movements = sorted({f"Batch {ln['batch']} {ln['grp']} {'pickup' if ln['purpose'] == 'PICKUP' else 'drop-off'}" for ln in lines})
-        area = (b["route_name"] or "").replace("Route ", "")
-        if kind == "Pickup":
-            ends = (area or "Route", "School")
-        else:
-            ends = ("School", area or "Route")
-        pend = sorted([ln for ln in lines if (ln["status"] == "EXPECTED" and ln["purpose"] == "PICKUP") or
-                       (ln["status"] == "ONBOARD" and ln["purpose"] == "DROPOFF")], key=lambda ln: ln["seq"] or 0)
-        if any(ln["status"] == "EXPECTED" and ln["purpose"] == "DROPOFF" for ln in lines):
-            nxt = "School (boarding)"
-        elif pend:
-            nxt = pend[0]["stop_name"] or "School"
-        elif onb:
-            nxt = "School gate"
-        else:
-            nxt = "Ready to close"
-        offline = r["status"] == "PENDING_SYNC"
-        pill = "<span class='pill orange'>Offline</span>" if offline else f"<span class='pill'>{kind}</span>"
-        cards.append(f"""<div class='bc'><div class='top'><span class='no'>{b['bus_no']}</span><span class='area'>Trip {r['trip_no']}</span>
+ACTIVE_ST = ("EXPECTED", "ONBOARD", "TRANSFER_PENDING")
+
+
+def _run_lines(run_id):
+    return db.q("""SELECT m.*, s.code, s.name, s.class_name || s.section AS class, st.name AS stop_name, st.seq AS stop_seq
+                   FROM manifest m JOIN students s ON s.id=m.student_id LEFT JOIN stops st ON st.id=m.stop_id
+                   WHERE m.run_id=? ORDER BY st.seq, s.name""", (run_id,))
+
+
+def trip_info(r):
+    """Summary of one trip run for cards and dialogs."""
+    b = db.bus(r["bus_id"])
+    lines = _run_lines(r["id"])
+    total = len(lines)
+    done = sum(1 for ln in lines if ln["status"] not in ACTIVE_ST)
+    onb = sum(1 for ln in lines if ln["status"] in ("ONBOARD", "TRANSFER_PENDING"))
+    exp_ = sum(1 for ln in lines if ln["status"] == "EXPECTED")
+    purposes = {ln["purpose"] for ln in lines}
+    kind = "Pickup" if purposes == {"PICKUP"} else ("Drop-off" if purposes == {"DROPOFF"} else "Drop-off + pickup")
+    movements = sorted({f"Batch {ln['batch']} {ln['grp']} {'pickup' if ln['purpose'] == 'PICKUP' else 'drop-off'}" for ln in lines})
+    area = (b["route_name"] or "").replace("Route ", "R")
+    ends = (area or "Route", "School") if kind == "Pickup" else ("School", area or "Route")
+    closed = r["status"] == "CLOSED"
+    pend = sorted([ln for ln in lines if (ln["status"] == "EXPECTED" and ln["purpose"] == "PICKUP") or
+                   (ln["status"] == "ONBOARD" and ln["purpose"] == "DROPOFF")], key=lambda ln: ln["stop_seq"] or 0)
+    if closed:
+        nxt = f"Closed {(r['end_ts'] or '')[11:16]}"
+    elif any(ln["status"] == "EXPECTED" and ln["purpose"] == "DROPOFF" for ln in lines):
+        nxt = "School (boarding)"
+    elif pend:
+        nxt = pend[0]["stop_name"] or "School"
+    elif onb:
+        nxt = "School gate"
+    else:
+        nxt = "Ready to close"
+    return dict(bus=b, lines=lines, total=total, done=done, onb=onb, exp=exp_, kind=kind, movements=movements, ends=ends,
+                closed=closed, offline=r["status"] == "PENDING_SYNC", nxt=nxt, frac=(done / total) if total else (1.0 if closed else 0.0))
+
+
+def _card_html(r, k):
+    b = k["bus"]
+    if k["closed"]:
+        pill = f"<span class='pill green'>Closed {(r['end_ts'] or '')[11:16]}</span>"
+    elif k["offline"]:
+        pill = "<span class='pill orange'>Offline</span>"
+    else:
+        pill = f"<span class='pill'>{k['kind']}</span>"
+    onboard_v = (f"{k['done']} / {k['total']} done" if k["closed"] else f"{k['onb']} / {k['onb'] + k['exp']}")
+    onboard_l = "Accounted for" if k["closed"] else "Onboard"
+    return f"""<div class='bc flat{' closed' if k['closed'] else ''}'><div class='top'><span class='no'>{b['bus_no']}</span><span class='area'>Trip {r['trip_no']}</span>
 <span style='margin-left:auto'>{pill}</span></div>
-<div class='prog'><div class='f' style='width:{frac * 100:.0f}%'></div><div class='k' style='left:calc({frac * 100:.0f}% - 8px)'></div></div>
-<div class='ends'><span>{ends[0]}</span><span>{ends[1]}</span></div>
-<div class='grid'><div><div class='l'>Movement</div><div class='v'>{'<br>'.join(movements[:2])}</div></div>
-<div><div class='l'>Onboard</div><div class='v'>{onb} / {onb + exp_}</div><div class='l'>{b['capacity']} seats</div></div>
-<div><div class='l'>Driver</div><div class='v'>{staff_name(r['driver_id'])}</div></div>
-<div><div class='l'>Attendant</div><div class='v'>{staff_name(r['caretaker_id'])}</div></div>
-<div><div class='l'>Next</div><div class='v'>{nxt}</div></div>
-<div><div class='l'>Progress</div><div class='v'>{done} / {total} done</div></div></div></div>""")
-    st.markdown("<div class='buscards'>" + "".join(cards) + "</div>", unsafe_allow_html=True)
+<div class='prog'><div class='f' style='width:{k['frac'] * 100:.0f}%'></div><div class='k' style='left:calc({k['frac'] * 100:.0f}% - 8px)'></div></div>
+<div class='ends'><span>{k['ends'][0]}</span><span>{k['ends'][1]}</span></div>
+<div class='grid'><div><div class='l'>Movement</div><div class='v'>{'<br>'.join(k['movements'][:2]) or '—'}</div></div>
+<div><div class='l'>{onboard_l}</div><div class='v'>{onboard_v}</div><div class='l'>{b['capacity']} seats</div></div>
+<div><div class='l'>Driver</div><div class='v'>{staff_name(r['final_driver_id'] or r['driver_id'])}</div></div>
+<div><div class='l'>Attendant</div><div class='v'>{staff_name(r['final_caretaker_id'] or r['caretaker_id'])}</div></div>
+<div><div class='l'>{'Status' if k['closed'] else 'Next'}</div><div class='v'>{k['nxt']}</div></div>
+<div><div class='l'>Progress</div><div class='v'>{k['done']} / {k['total']} done</div></div></div></div>"""
+
+
+def bus_cards(runs, key="bc", per_row=3):
+    """Trip cards in a grid, each with Locate on map and Students buttons (open a dialog)."""
+    for i in range(0, len(runs), per_row):
+        cols = st.columns(per_row)
+        for col, r in zip(cols, runs[i:i + per_row]):
+            k = trip_info(r)
+            with col, st.container(border=True):
+                st.markdown(_card_html(r, k), unsafe_allow_html=True)
+                b1, b2 = st.columns(2)
+                if b1.button("Locate on map", key=f"{key}_loc_{r['id']}", width="stretch", icon=":material/location_on:"):
+                    locate_dialog(r["id"])
+                if b2.button("Students", key=f"{key}_stu_{r['id']}", width="stretch", icon=":material/group:"):
+                    students_dialog(r["id"])
+
+
+def run_position(r):
+    """Last known position of a trip: end GPS if closed, else latest accepted scan with GPS, else start GPS."""
+    if r["status"] == "CLOSED" and r["end_lat"] is not None:
+        return r["end_lat"], r["end_lon"], r["end_ts"], "trip end"
+    ev = db.q1("""SELECT lat, lon, captured_ts FROM events WHERE run_id=? AND lat IS NOT NULL AND result<>'REJECTED'
+                  ORDER BY captured_ts DESC LIMIT 1""", (r["id"],))
+    if ev:
+        return ev["lat"], ev["lon"], ev["captured_ts"], "last scan"
+    return r["start_lat"], r["start_lon"], r["start_ts"], "trip start"
+
+
+@st.dialog("Locate on map", width="large")
+def locate_dialog(run_id):
+    r = db.q1("SELECT * FROM trip_runs WHERE id=?", (run_id,))
+    k = trip_info(r)
+    b = k["bus"]
+    lat, lon, when, src = run_position(r)
+    st.markdown(f"### {b['bus_no']} · Trip {r['trip_no']}")
+    st.caption(f"{k['kind']} · {'Closed ' + (r['end_ts'] or '')[11:16] if k['closed'] else ('Offline' if k['offline'] else 'Moving')} · "
+               f"position from {src} {(when or '')[11:16]} · next: {k['nxt']}")
+    stops = [{"lat": s_["lat"], "lon": s_["lon"], "name": s_["name"]} for s_ in db.stops_of_bus(b["id"]) if s_["lat"] is not None]
+    slat, slon = db.school_pos()
+    stops.append({"lat": slat, "lon": slon, "name": "School"})
+    layers = [pdk.Layer("PathLayer", pd.DataFrame([{"path": [[s_["lon"], s_["lat"]] for s_ in stops]}]), get_path="path",
+                        get_color=[61, 79, 214, 120], width_min_pixels=3),
+              pdk.Layer("ScatterplotLayer", pd.DataFrame(stops), get_position="[lon, lat]", get_radius=50, radius_min_pixels=5,
+                        get_fill_color=[120, 130, 150, 200], pickable=True),
+              pdk.Layer("TextLayer", pd.DataFrame(stops), get_position="[lon, lat]", get_text="name", get_size=12,
+                        get_pixel_offset=[0, 16], get_color=[70, 80, 110])]
+    if lat is not None:
+        bdf = pd.DataFrame([{"lat": lat, "lon": lon, "name": f"{b['bus_no']} · {k['onb']} on board"}])
+        layers += [pdk.Layer("ScatterplotLayer", bdf, get_position="[lon, lat]", get_radius=90, radius_min_pixels=10,
+                             get_fill_color=[30, 142, 62] if not k["closed"] else [28, 84, 144], pickable=True),
+                   pdk.Layer("TextLayer", bdf, get_position="[lon, lat]", get_text="name", get_size=14, get_pixel_offset=[0, -20],
+                             get_color=[20, 20, 20])]
+    else:
+        st.info("No GPS position recorded for this trip yet.")
+    clat, clon = (lat, lon) if lat is not None else (slat, slon)
+    st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=pdk.ViewState(latitude=clat, longitude=clon, zoom=13.5),
+                             map_style="light", tooltip={"text": "{name}"}), height=430)
+    if lat is not None:
+        st.caption(f"GPS {lat:.5f}, {lon:.5f}. In production the position comes live from the bus GPS unit.")
+
+
+@st.dialog("Students", width="large")
+def students_dialog(run_id):
+    r = db.q1("SELECT * FROM trip_runs WHERE id=?", (run_id,))
+    k = trip_info(r)
+    b = k["bus"]
+    status = f"Closed {(r['end_ts'] or '')[11:16]}" if k["closed"] else ("Offline" if k["offline"] else "Moving")
+    st.markdown(f"### {b['bus_no']} · Trip {r['trip_no']}")
+    st.markdown(f"<span class='pill {'green' if k['closed'] else ('orange' if k['offline'] else '')}'>{status}</span> "
+                + " ".join(f"<span class='pill grey'>{m}</span>" for m in k["movements"]), unsafe_allow_html=True)
+    c = st.columns(4)
+    c[0].metric("On board", k["onb"])
+    c[1].metric("Still to pick up", k["exp"])
+    c[2].metric("Accounted for", f"{k['done']} / {k['total']}")
+    c[3].metric("Next" if not k["closed"] else "Status", k["nxt"])
+    st.caption(f"Driver {staff_name(r['final_driver_id'] or r['driver_id'])} · Supervisor {staff_name(r['final_supervisor_id'] or r['supervisor_id'])} · "
+               f"Attendant {staff_name(r['final_caretaker_id'] or r['caretaker_id'])} · started {(r['start_ts'] or '')[11:16]}"
+               + (f" · closed {(r['end_ts'] or '')[11:16]} · sweep by {r['sweep_by'] or '—'}" if k["closed"] else ""))
+    groups = [("On board", [ln for ln in k["lines"] if ln["status"] in ("ONBOARD", "TRANSFER_PENDING")],
+               ("name", "code", "class", "purpose", "stop_name", "status", "entry_ts")),
+              ("Still to pick up", [ln for ln in k["lines"] if ln["status"] == "EXPECTED"], ("name", "code", "class", "purpose", "stop_name")),
+              ("Completed", [ln for ln in k["lines"] if ln["status"] in ("COMPLETED", "RETURNED", "TRANSFERRED_OUT")],
+               ("name", "code", "class", "purpose", "stop_name", "entry_ts", "exit_ts", "recipient_name", "received_by")),
+              ("Absent / no-show", [ln for ln in k["lines"] if ln["status"] in ("ABSENT_DECLARED", "NO_SHOW", "CANCELLED")],
+               ("name", "code", "class", "purpose", "stop_name", "status"))]
+    if k["closed"]:
+        groups = groups[2:] + groups[:2]          # closed trip: show who was handed over first
+    tabs = st.tabs([f"{g} ({len(ls)})" for g, ls, _ in groups])
+    for tab, (g, ls, cols) in zip(tabs, groups):
+        with tab:
+            lines_table(ls, cols)
 
 
 def staff_name(i):

@@ -110,6 +110,7 @@ st.markdown("""<style>
   .bc .ends{display:flex;justify-content:space-between;font-size:.72rem;color:var(--muted)}
   .bc .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:10px}
   .bc .l{font-size:.72rem;color:var(--muted)} .bc .v{font-size:.86rem;font-weight:600;color:var(--ink)}
+  .bc.flat{border:none;box-shadow:none;padding:2px 2px 6px} .bc.closed .prog .f{background:#9ED3B0} .bc.closed .prog .k{background:var(--green)}
 """ + rtl_css(), unsafe_allow_html=True)
 
 
