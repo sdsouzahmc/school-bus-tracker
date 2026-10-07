@@ -318,6 +318,7 @@ _auto = st.toggle("🔄 Auto-refresh lists every 10 s (shows scans made on other
 
 @st.fragment(run_every=10 if _auto else None)
 def _lists_panel():
+    cur_stop = st.session_state.get(f"{K}_stop", SCHOOL_STOP)
     _q = dstore.load_queue(dev_id) if dev_id else []
     _lines = replica(run["id"], _q)[1] if _q else E.run_lines(run["id"])
     _cnt = pd.Series([ln["status"] for ln in _lines]).value_counts().to_dict() if _lines else {}
@@ -336,21 +337,29 @@ def _lists_panel():
             _up.append({"Stop": _s["name"], "To board": _pick + _board, "To get off": _drop + _hand})
     with st.expander(f"🗺️ Upcoming stops ({len(_up)})", expanded=bool(_up)):
         if _up:
-            st.dataframe(_up, hide_index=True, width="stretch")
+            _cur_name = t("School") if cur_stop == SCHOOL_STOP else next((s["name"] for s in db.stops_of_bus(bus_id) if s["id"] == cur_stop), "")
+            _df = pd.DataFrame(_up)
+            st.dataframe(_df.style.apply(lambda r: ["background-color:#FFF4C2;font-weight:600" if r["Stop"] == _cur_name else "" for _ in r], axis=1),
+                         hide_index=True, width="stretch")
         else:
             st.caption("No stops left — every child is accounted for.")
     left, right = st.columns(2)
     with left:
         ob = [ln for ln in _lines if ln["status"] in ("ONBOARD", "TRANSFER_PENDING")]
+        off_here = [ln for ln in ob if (ln["purpose"] == "DROPOFF" and ln["stop_id"] == cur_stop) or
+                    (ln["purpose"] == "PICKUP" and cur_stop == SCHOOL_STOP and ln["status"] == "ONBOARD")]
         st.subheader(f"🟢 {t('On board')} ({len(ob)})")
-        lines_table(ob, ("name", "class", "purpose", "stop_name", "status", "entry_ts"))
+        if off_here and not is_driver:
+            st.markdown(f"<span class='pill orange'>📍 {len(off_here)} {t('get off at this stop')}</span>", unsafe_allow_html=True)
+        lines_table(ob, ("name", "class", "purpose", "stop_name", "status", "entry_ts"), highlight={ln["id"] for ln in off_here})
     with right:
         ex = [ln for ln in _lines if ln["status"] == "EXPECTED"]
         here = [ln for ln in ex if (ln["purpose"] == "PICKUP" and ln["stop_id"] == cur_stop) or (ln["purpose"] == "DROPOFF" and cur_stop == SCHOOL_STOP)]
         st.subheader(f"⏳ {t('Expected')} ({len(ex)})")
         if here and not is_driver:
-            st.caption(f"{len(here)} {t('expected at this stop')}")
-        lines_table(sorted(ex, key=lambda ln: (ln not in here, ln["stop_seq"] or 0)), ("name", "class", "purpose", "stop_name"))
+            st.markdown(f"<span class='pill orange'>📍 {len(here)} {t('expected at this stop')}</span>", unsafe_allow_html=True)
+        lines_table(sorted(ex, key=lambda ln: (ln not in here, ln["stop_seq"] or 0)), ("name", "class", "purpose", "stop_name"),
+                    highlight={ln["id"] for ln in here})
         if ex and not is_driver:
             ns = st.selectbox(t("Mark no-show"), [ln["student_id"] for ln in ex], index=None, placeholder="Child did not come…",
                               format_func=lambda i: next(f"{ln['name']} · {ln['stop_name'] or t('School')}" for ln in ex if ln["student_id"] == i),

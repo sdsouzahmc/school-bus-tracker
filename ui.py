@@ -69,14 +69,20 @@ def bus_map(points, stops=None, height=420, zoom=11.5):
                              map_style="light", tooltip={"text": "{label}{name}"}), height=height)
 
 
-def lines_table(lines, cols=("name", "class", "batch", "grp", "purpose", "stop_name", "status", "entry_ts", "exit_ts", "handover")):
+def lines_table(lines, cols=("name", "class", "batch", "grp", "purpose", "stop_name", "status", "entry_ts", "exit_ts", "handover"),
+                highlight=None):
+    """highlight: set of manifest line ids to mark (children to act on at the selected stop) — shown first, tinted and with 📍."""
     if not lines:
         st.caption("—")
         return
     names = {"name": t("Student"), "code": "ID", "class": t("Class"), "batch": t("Batch"), "grp": t("Group"), "purpose": t("Purpose"), "stop_name": t("Stop"),
              "status": t("Status"), "entry_ts": t("Boarded"), "exit_ts": t("Got off"), "handover": t("Handover"),
              "recipient_name": t("Handed to"), "received_by": t("Received by"), "note": t("Note")}
+    hl = set(highlight or ())
+    if hl:
+        lines = sorted(lines, key=lambda ln: ln.get("id") not in hl)
     df = pd.DataFrame(lines)
+    mark = [ln.get("id") in hl for ln in lines]
     df = df[[c for c in cols if c in df]]
     if "status" in df:
         df["status"] = df["status"].map(status_text)
@@ -87,7 +93,13 @@ def lines_table(lines, cols=("name", "class", "batch", "grp", "purpose", "stop_n
         df["purpose"] = df["purpose"].map(lambda v: t((v or "").title()))
     if "stop_name" in df:
         df["stop_name"] = df["stop_name"].fillna(t("School"))
-    st.dataframe(df.rename(columns=names), hide_index=True, width="stretch")
+    df = df.rename(columns=names)
+    if hl and any(mark):
+        df.insert(0, " ", ["📍" if m else "" for m in mark])
+        sty = df.style.apply(lambda row: ["background-color:#FFF4C2;font-weight:600" if mark[row.name] else "" for _ in row], axis=1)
+        st.dataframe(sty, hide_index=True, width="stretch")
+    else:
+        st.dataframe(df, hide_index=True, width="stretch")
 
 
 def bus_cards(runs):
@@ -100,6 +112,7 @@ def bus_cards(runs):
         done = sum(1 for ln in lines if ln["status"] not in ("EXPECTED", "ONBOARD", "TRANSFER_PENDING"))
         frac = done / total
         onb = sum(1 for ln in lines if ln["status"] in ("ONBOARD", "TRANSFER_PENDING"))
+        exp_ = sum(1 for ln in lines if ln["status"] == "EXPECTED")   # still to board on this trip
         purposes = {ln["purpose"] for ln in lines}
         kind = "Pickup" if purposes == {"PICKUP"} else ("Drop-off" if purposes == {"DROPOFF"} else "Drop-off + pickup")
         movements = sorted({f"Batch {ln['batch']} {ln['grp']} {'pickup' if ln['purpose'] == 'PICKUP' else 'drop-off'}" for ln in lines})
@@ -125,7 +138,7 @@ def bus_cards(runs):
 <div class='prog'><div class='f' style='width:{frac * 100:.0f}%'></div><div class='k' style='left:calc({frac * 100:.0f}% - 8px)'></div></div>
 <div class='ends'><span>{ends[0]}</span><span>{ends[1]}</span></div>
 <div class='grid'><div><div class='l'>Movement</div><div class='v'>{'<br>'.join(movements[:2])}</div></div>
-<div><div class='l'>Onboard</div><div class='v'>{onb} / {b['capacity']}</div></div>
+<div><div class='l'>Onboard</div><div class='v'>{onb} / {onb + exp_}</div><div class='l'>{b['capacity']} seats</div></div>
 <div><div class='l'>Driver</div><div class='v'>{staff_name(r['driver_id'])}</div></div>
 <div><div class='l'>Attendant</div><div class='v'>{staff_name(r['caretaker_id'])}</div></div>
 <div><div class='l'>Next</div><div class='v'>{nxt}</div></div>
