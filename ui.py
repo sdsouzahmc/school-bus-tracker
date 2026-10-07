@@ -183,7 +183,7 @@ def bus_cards(runs, key="bc", per_row=3):
                     locate_dialog(r["id"])
                 if b2.button("Students", key=f"{key}_stu_{r['id']}", width="stretch", icon=":material/group:"):
                     students_dialog(r["id"])
-                if not k["closed"]:
+                if True:   # also on closed trips: the crew still sees messages between trips
                     n_open = len([m_ for m_ in E_.bus_messages(r["bus_id"], only_open=True)])
                     if st.button("Message bus" + (f" ({n_open} unread)" if n_open else ""), key=f"{key}_msg_{r['id']}", width="stretch",
                                  icon=":material/campaign:"):
@@ -300,7 +300,8 @@ def message_dialog(run_id):
     r = db.q1("SELECT * FROM trip_runs WHERE id=?", (run_id,))
     b = db.bus(r["bus_id"])
     st.markdown(f"### {b['bus_no']} · Trip {r['trip_no']}")
-    st.caption("The message appears on the crew and driver screens with a sound alert, until a crew member taps Acknowledge.")
+    st.caption("The message appears on the bus crew and driver screens with a sound alert, until a crew member taps Acknowledge"
+               + (" — this trip is closed, so it reaches the crew wherever they are in the app." if r["status"] == "CLOSED" else "."))
     quick = st.pills("Quick messages", QUICK_MSGS, key=f"qm_{run_id}")
     text = st.text_area("Message", value=quick or "", key=f"mt_{run_id}_{quick or ''}", max_chars=300)
     if st.button("Send to bus", type="primary", icon=":material/send:", disabled=not text.strip(), key=f"ms_{run_id}"):
