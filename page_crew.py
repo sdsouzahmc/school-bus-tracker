@@ -154,7 +154,11 @@ if not run:
 # ------------------------------------------------------------------ trip in progress
 lines = replica(run["id"], queue)[1] if queue else E.run_lines(run["id"])
 cnt = pd.Series([ln["status"] for ln in lines]).value_counts().to_dict() if lines else {}
-st.markdown(f"### Trip {run['trip_no']} · {TRIPS[run['trip_no']]['label']}")
+_th1, _th2 = st.columns([5, 1], vertical_alignment="center")
+_th1.markdown(f"### Trip {run['trip_no']} · {TRIPS[run['trip_no']]['label']}")
+if _th2.button("🔄 " + t("Refresh"), key=f"{K}_refresh_top", width="stretch",
+               help="Reload counts, lists and the close-trip check (shows scans made on other phones too)"):
+    st.rerun()
 st.caption(f"Started {run['start_ts'][11:16]} by {run['started_by']} · crew: {db.staff_name(run['driver_id'])} / {db.staff_name(run['supervisor_id'])} / "
            f"{db.staff_name(run['caretaker_id'])}" + (" · 📴 OFFLINE" if offline else ""))
 m1, m2, m3, m4 = st.columns(4)

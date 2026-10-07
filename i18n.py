@@ -47,6 +47,7 @@ AR = {
     "I walked the full bus and checked every seat": "تجولت في الحافلة كاملة وفحصت كل مقعد",
     "Offline mode": "وضع عدم الاتصال",
     "get off at this stop": "ينزلون في هذه المحطة",
+    "Refresh": "تحديث",
     "GPS unavailable": "تحديد الموقع غير متاح",
     "Sync now": "مزامنة الآن",
     "Pending sync": "بانتظار المزامنة",
