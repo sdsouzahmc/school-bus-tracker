@@ -101,15 +101,16 @@ def parent_changes_scope(date, bus_id=None, trip_no=None, con=None):
     return out
 
 
-def reset_trips(date, user, role, bus_id=None, trip_no=None, parent_changes=False):
+def reset_trips(date, user, role, bus_id=None, trip_no=None, parent_changes=False, include_closed=False):
     """Admin tool: permanently remove trips for a date (optionally one bus and/or one trip) with their manifest, scans,
     parent notices and incidents, so the trip(s) can be run again. The reset itself is written to the audit log."""
     if not date:
         raise ValueError("Date is required.")
     with db.tx() as c:
         runs = reset_scope(date, bus_id, trip_no, c)
-        kept = [r for r in runs if r["status"] == "CLOSED"]      # a closed trip is final and can never be reset
-        ids = [r["id"] for r in runs if r["status"] != "CLOSED"]
+        # a closed trip is final; only the administrator's explicit testing override removes it
+        kept = [] if include_closed else [r for r in runs if r["status"] == "CLOSED"]
+        ids = [r["id"] for r in runs if include_closed or r["status"] != "CLOSED"]
         for t_ in ("manifest", "events", "notifications", "incidents"):
             c.executemany(f"DELETE FROM {t_} WHERE run_id=?", [(i,) for i in ids])
         c.executemany("DELETE FROM trip_runs WHERE id=?", [(i,) for i in ids])
@@ -121,9 +122,16 @@ def reset_trips(date, user, role, bus_id=None, trip_no=None, parent_changes=Fals
                 removed_pc += len(rows)
         bus_no = q1("SELECT bus_no FROM buses WHERE id=?", (bus_id,), c)["bus_no"] if bus_id else "all buses"
         scope = f"{date} · {bus_no} · {'Trip ' + str(trip_no) if trip_no else 'all trips'}"
-        db.audit(user, role, "TRIP_DATA_RESET", "trip_runs", date,
+        db.audit(user, role, "TRIP_DATA_RESET_FORCED" if include_closed else "TRIP_DATA_RESET", "trip_runs", date,
                  f"{scope}: {len(ids)} trip(s) removed, {len(kept)} closed trip(s) kept" + (f", {removed_pc} absence/change request(s) removed" if parent_changes else ""), c)
         return len(ids), removed_pc, len(kept)
+
+
+def reset_open_trips_any_date(bus_id, user, role):
+    """Remove trips of one bus that were left open on earlier days (e.g. the dataset's unclosed custody case)."""
+    days = [r["date"] for r in q("SELECT DISTINCT date FROM trip_runs WHERE bus_id=? AND status IN ('IN_PROGRESS','PENDING_SYNC','PLANNED')",
+                                 (bus_id,))]
+    return sum(reset_trips(d_, user, role, bus_id=bus_id)[0] for d_ in days)
 
 
 def reset_day(date, user, role):
