@@ -1,6 +1,7 @@
 """Crew app (bus tablet): today's list, start with crew confirmation, explicit Check In / Check Out, handover, no-show,
 offline queue + sync, encrypted roster, contingency roster, close with reconciliation and named sweep. Drivers: read-only."""
 import uuid
+from datetime import date
 
 import pandas as pd
 import streamlit as st
@@ -33,6 +34,8 @@ dev_id = dev["id"] if dev else None
 today = db.today()
 
 st.title(f"📷 {bus['bus_no']} — {t('Crew app')}")
+_now = db.now()
+st.markdown(f"<div class='datebar'>📅 <b>{_now:%A %d %b %Y}</b> · {_now:%H:%M} <span>Qatar</span></div>", unsafe_allow_html=True)
 st.caption(f"{bus['route_name']} · {t('Driver')}: {db.staff_name(bus['driver_id'])} · {t('Supervisor')}: {db.staff_name(bus['supervisor_id'])} · "
            f"{t('Care-taker')}: {db.staff_name(bus['caretaker_id'])} · Device: {dev['name'] if dev else '—'}")
 
@@ -196,7 +199,11 @@ _th1.markdown(f"### Trip {run['trip_no']} · {TRIPS[run['trip_no']]['label']}")
 if _th2.button("🔄 " + t("Refresh"), key=f"{K}_refresh_top", width="stretch",
                help="Reload counts, lists and the close-trip check (shows scans made on other phones too)"):
     st.rerun()
-st.caption(f"Started {run['start_ts'][11:16]} by {run['started_by']} · crew: {db.staff_name(run['driver_id'])} / {db.staff_name(run['supervisor_id'])} / "
+_rd = date.fromisoformat(run["date"])
+if run["date"] != today:
+    msg("error", f"{t('This trip is from')} <b>{_rd:%A %d %b %Y}</b> — "
+        + t("it was never closed. Account for every child and close it, or call the transport office."))
+st.caption(f"📅 {_rd:%a %d %b %Y} · Started {run['start_ts'][11:16]} by {run['started_by']} · crew: {db.staff_name(run['driver_id'])} / {db.staff_name(run['supervisor_id'])} / "
            f"{db.staff_name(run['caretaker_id'])}" + (" · 📴 OFFLINE" if offline else ""))
 _cn = [(t("On board"), cnt.get("ONBOARD", 0) + cnt.get("TRANSFER_PENDING", 0), "#2E9E5B"), (t("Expected"), cnt.get("EXPECTED", 0), "#E07A1F"),
        (t("Completed"), cnt.get("COMPLETED", 0) + cnt.get("RETURNED", 0), "#3D4FD6"),
