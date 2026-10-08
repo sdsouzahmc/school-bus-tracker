@@ -37,25 +37,40 @@ with h2:
                 unsafe_allow_html=True)
 
 
+_bl = db.buses()
+_bus_no = {b_["id"]: b_["bus_no"] for b_ in _bl}
+st.pills("Bus", ["ALL"] + [b_["id"] for b_ in _bl], default="ALL", key="dash_bus", label_visibility="collapsed",
+         format_func=lambda i: "All buses" if i == "ALL" else _bus_no.get(i, i))
+
+
 @st.fragment(run_every=15 if auto else None)
 def board():
     D = db.today()
-    students = db.q1("SELECT COUNT(*) n FROM students WHERE active=1")["n"]
-    nbus = db.q1("SELECT COUNT(*) n FROM buses")["n"]
-    op_bus = db.q1("SELECT COUNT(DISTINCT bus_id) n FROM trip_runs WHERE date=?", (D,))["n"]
-    active = db.q("SELECT * FROM trip_runs WHERE status IN ('IN_PROGRESS','PENDING_SYNC') AND date=?", (D,))
+    BUS = st.session_state.get("dash_bus") or "ALL"
+    one = BUS != "ALL"
+
+    def bw(col):
+        """SQL filter on the selected bus (empty when All buses)."""
+        return (f" AND {col}=?", [BUS]) if one else ("", [])
+    f_s, p_s = bw("bus_id")
+    students = db.q1("SELECT COUNT(*) n FROM students WHERE active=1" + f_s, p_s)["n"]
+    nbus = 1 if one else db.q1("SELECT COUNT(*) n FROM buses")["n"]
+    op_bus = db.q1("SELECT COUNT(DISTINCT bus_id) n FROM trip_runs WHERE date=?" + f_s, [D] + p_s)["n"]
+    active = db.q("SELECT * FROM trip_runs WHERE status IN ('IN_PROGRESS','PENDING_SYNC') AND date=?" + f_s, [D] + p_s)
     open_ids = [r["id"] for r in active] or [-1]
     ph = ",".join("?" * len(open_ids))
     onboard_lines = db.q(f"SELECT batch, grp, purpose FROM manifest WHERE run_id IN ({ph}) AND status IN ('ONBOARD','TRANSFER_PENDING')", open_ids)
+    f_r, p_r = bw("r.bus_id")
     handovers = db.q1("""SELECT COUNT(*) n FROM manifest m JOIN trip_runs r ON r.id=m.run_id
-                         WHERE r.date=? AND m.handover IN ('SCHOOL_RECEIPT','HOME_RELEASE')""", (D,))["n"]
-    alerts = db.q("""SELECT i.*, b.bus_no FROM incidents i LEFT JOIN buses b ON b.id=i.bus_id WHERE i.status<>'RESOLVED'
-                     ORDER BY CASE i.severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, i.id DESC""")
+                         WHERE r.date=? AND m.handover IN ('SCHOOL_RECEIPT','HOME_RELEASE')""" + f_r, [D] + p_r)["n"]
+    f_i, p_i = bw("i.bus_id")
+    alerts = db.q("""SELECT i.*, b.bus_no FROM incidents i LEFT JOIN buses b ON b.id=i.bus_id WHERE i.status<>'RESOLVED'""" + f_i +
+                  """ ORDER BY CASE i.severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END, i.id DESC""", p_i)
 
     def kpi(icon, label, value, sub="", cls=""):
         return (f"<div class='kpi'><div class='lab'>{ICON[icon]}{label}</div><div class='val {cls}'>{value:,}</div>"
                 f"<div class='sub'>{sub}&nbsp;</div></div>")
-    st.markdown("<div class='kpis'>" + kpi("people", "Registered Students", students) + kpi("bus", "Operating Buses", op_bus, f"of {nbus} today")
+    st.markdown("<div class='kpis'>" + kpi("people", "Registered Students" if not one else f"Students on {_bus_no.get(BUS)}", students) + kpi("bus", "Operating Buses", op_bus, f"of {nbus} today")
                 + kpi("pin", "Active Trips", len(active)) + kpi("people", "Students Onboard", len(onboard_lines))
                 + kpi("check", "Completed Handovers", handovers, "today") + kpi("warn", "Open Alerts", len(alerts), "", "orange" if alerts else "")
                 + "</div>", unsafe_allow_html=True)
@@ -64,7 +79,7 @@ def board():
     with left, st.container(border=True):
         st.markdown(f"<div class='sect'>{ICON['pin']}Bus Location Overview <span class='muted' style='margin-left:auto;font-weight:400'>"
                     "Vehicle locations · last scan position</span></div>", unsafe_allow_html=True)
-        pos = bus_positions()
+        pos = [x_ for x_ in bus_positions() if not one or x_["bus_id"] == BUS]
         slat, slon = db.school_pos()
         layers = []
         if pos:
@@ -95,12 +110,15 @@ def board():
                 st.markdown(html, unsafe_allow_html=True)
         with st.container(border=True):
             st.markdown(f"<div class='sect'>{ICON['shield']}Safety and Communication</div>", unsafe_allow_html=True)
-            closed = db.q1("SELECT COUNT(*) n, SUM(sweep_by IS NOT NULL AND sweep_by<>'') s FROM trip_runs WHERE date=? AND status='CLOSED'", (D,))
-            nt = db.q1("SELECT COUNT(*) n, SUM(status='SENT') s FROM notifications WHERE substr(ts,1,10)=?", (D,))
+            closed = db.q1("SELECT COUNT(*) n, SUM(sweep_by IS NOT NULL AND sweep_by<>'') s FROM trip_runs WHERE date=? AND status='CLOSED'" + f_s,
+                           [D] + p_s)
+            _nj = " LEFT JOIN trip_runs r ON r.id=n.run_id"
+            nt = db.q1("SELECT COUNT(*) n, SUM(n.status='SENT') s FROM notifications n" + _nj + " WHERE substr(n.ts,1,10)=?" + f_r, [D] + p_r)
             if not nt["n"]:
-                nt = db.q1("SELECT COUNT(*) n, SUM(status='SENT') s FROM notifications")
+                nt = db.q1("SELECT COUNT(*) n, SUM(n.status='SENT') s FROM notifications n" + _nj + " WHERE 1=1" + f_r, p_r)
             pct = 100 * (nt["s"] or 0) / nt["n"] if nt["n"] else 100
-            last = db.q1("SELECT MAX(captured_ts) t FROM events WHERE result<>'REJECTED'")["t"]
+            last = db.q1("SELECT MAX(e.captured_ts) t FROM events e LEFT JOIN trip_runs r ON r.id=e.run_id WHERE e.result<>'REJECTED'" + f_r,
+                         p_r)["t"]
             last_txt = pd.Timestamp(last).strftime("%I:%M %p") if last else "—"
             st.markdown(f"<div class='safety'><div><div class='lab'>Bus sweeps today</div><div class='v'>{ICON['ok']}"
                         f"<span style='color:#2E9E5B'>{closed['s'] or 0} / {closed['n'] or 0}</span></div></div>"
@@ -114,14 +132,18 @@ def board():
         st.markdown(f"<div class='sect'>{ICON['cal']}Daily Trip Schedule</div>", unsafe_allow_html=True)
         rows = ""
         for no, tr in TRIPS.items():
-            runs = db.q("SELECT status FROM trip_runs WHERE date=? AND trip_no=?", (D, no))
+            runs = db.q("SELECT status, start_ts, end_ts FROM trip_runs WHERE date=? AND trip_no=?" + f_s, [D, no] + p_s)
             if any(r["status"] in ("IN_PROGRESS", "PENDING_SYNC") for r in runs):
                 pill = f"<span class='pill blue'>● Active</span>"
             elif runs:
                 pill = "<span class='pill green'>Completed</span>"
             else:
                 pill = "<span class='pill grey'>Scheduled</span>"
-            buses = f"{len(runs)} bus{'es' if len(runs) != 1 else ''}" if runs else ""
+            if one and runs:
+                r0 = runs[0]
+                buses = (f"started {(r0['start_ts'] or '')[11:16]}" + (f" · closed {(r0['end_ts'] or '')[11:16]}" if r0["end_ts"] else ""))
+            else:
+                buses = f"{len(runs)} bus{'es' if len(runs) != 1 else ''}" if runs else ""
             rows += (f"<tr><td style='padding:9px 8px;white-space:nowrap'>Trip {no}</td><td>{tr['label']}</td>"
                      f"<td style='white-space:nowrap'>{tr['window'][0]}–{tr['window'][1]}</td><td>{pill} <span class='muted'>{buses}</span></td></tr>")
         st.markdown("<table style='width:100%;border-collapse:collapse;font-size:.9rem'><thead><tr style='background:#F4F6FA;color:#3A4160;text-align:left'>"
