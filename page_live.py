@@ -43,6 +43,13 @@ def board():
     day_runs = db.q("""SELECT r.* FROM trip_runs r JOIN buses b ON b.id=r.bus_id WHERE r.date=? AND r.status IN ('IN_PROGRESS','PENDING_SYNC','CLOSED')
                        ORDER BY r.status='CLOSED', r.trip_no, b.bus_no""", (D,))
     if day_runs:
+        _bus_no = {b_["id"]: b_["bus_no"] for b_ in db.buses()}
+        _buses = sorted({r["bus_id"] for r in day_runs}, key=lambda i: _bus_no.get(i, ""))
+        pick_bus = st.pills("Bus", ["ALL"] + _buses, default="ALL", key="live_bus",
+                            format_func=lambda i: f"All buses ({len(day_runs)})" if i == "ALL"
+                            else f"{_bus_no.get(i, i)} ({sum(1 for r in day_runs if r['bus_id'] == i)})") or "ALL"
+        if pick_bus != "ALL":
+            day_runs = sorted([r for r in day_runs if r["bus_id"] == pick_bus], key=lambda r: r["trip_no"])
         moving = [r for r in day_runs if r["status"] == "IN_PROGRESS"]
         offline = [r for r in day_runs if r["status"] == "PENDING_SYNC"]
         closed = [r for r in day_runs if r["status"] == "CLOSED"]

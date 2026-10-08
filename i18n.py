@@ -48,6 +48,8 @@ AR = {
     "Offline mode": "وضع عدم الاتصال",
     "get off at this stop": "ينزلون في هذه المحطة",
     "Refresh": "تحديث",
+    "All trips for today are completed": "اكتملت جميع رحلات اليوم",
+    "trips closed. Nothing more to start today.": "رحلات مغلقة. لا يوجد ما يبدأ اليوم.",
     "This trip is from": "هذه الرحلة من تاريخ",
     "it was never closed. Account for every child and close it, or call the transport office.": "لم يتم إغلاقها. تحقق من جميع الأطفال وأغلقها أو اتصل بمكتب النقل.",
     "Message from office": "رسالة من المكتب",

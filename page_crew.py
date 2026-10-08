@@ -160,7 +160,11 @@ if not run:
         st.stop()
     st.divider()
     st.subheader("▶ " + t("Start trip"))
-    avail = [n for n in TRIPS if n not in runs_today] or [default_trip]
+    avail = [n for n in TRIPS if n not in runs_today]
+    if not avail:
+        msg("ok", f"<b>{t('All trips for today are completed')}</b> — {len(runs_today)} / {len(TRIPS)} "
+            + t("trips closed. Nothing more to start today."))
+        st.stop()
     st.markdown("**" + t("Which trip are you starting?") + "**")
     trip_no = st.pills(t("Trip"), avail, default=default_trip if default_trip in avail else avail[0], key=f"{K}_trip_p",
                        format_func=lambda n: f"Trip {n} · {TRIPS[n]['window'][0]}–{TRIPS[n]['window'][1]}", label_visibility="collapsed") \
@@ -185,8 +189,11 @@ if not run:
         first = SCHOOL_STOP if any(m[2] == "DROPOFF" for m in TRIPS[trip_no]["movements"]) else (db.stops_of_bus(bus_id) or [{"id": SCHOOL_STOP}])[0]["id"]
         g = gps_fix(first, gps_off)
         rid, m = E.start_run(bus_id, today, trip_no, d_id, s_id, c_id, g["lat"], g["lon"], user["username"], role, dev_id)
-        st.session_state[f"{K}_last"] = ("ok" if rid else "error", m + ("" if g["gps_ok"] else " (start location missing — GPS unavailable)"))
-        st.rerun()
+        if not rid:
+            msg("error", m)          # e.g. this trip already ran today — show it here, next to the button
+        else:
+            st.session_state[f"{K}_last"] = ("ok", m + ("" if g["gps_ok"] else " (start location missing — GPS unavailable)"))
+            st.rerun()
     if offline:
         st.caption("Trips are started online (the device downloads the day's manifest). Scanning then continues offline.")
     st.stop()
