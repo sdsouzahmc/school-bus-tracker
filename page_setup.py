@@ -449,10 +449,14 @@ with tabs[10]:
                              hide_index=True, width="stretch")
                 if any(r["onboard"] for r in runs_):
                     st.warning("Some of these trips still show children on board. Reset only if this is test data.")
-            also = st.checkbox(f"Optional: also remove parent absences and change requests for this date ({n_pc} found)", value=False,
-                               key="rs_pc", disabled=n_pc == 0)
-            sure = st.checkbox("I understand this permanently deletes the selected trip data", key="rs_ok",
-                               disabled=not runs_ and not (also and n_pc))
+            also = False
+            if n_pc:   # only offered when there is something to remove
+                also = st.checkbox(f"Optional: also remove parent absences and change requests for this date ({n_pc} found)", value=False,
+                                   key="rs_pc")
+            can = bool(runs_) or bool(also and n_pc)
+            if can:
+                st.markdown("**Step 2 — confirm:** tick the box below, then press **Reset trip data**.")
+            sure = st.checkbox("I understand this permanently deletes the selected trip data", key="rs_ok", disabled=not can)
             if st.button("Reset trip data", type="primary", disabled=not sure or (not runs_ and not (also and n_pc)), key="rs_go"):
                 n, m, k = E.reset_trips(D_, user["username"], role, bus_id=rbus, trip_no=rtrip, parent_changes=also, include_closed=force)
                 st.session_state.rs_result = ("ok", f"Reset done for {D_}: {n} trip(s) removed"
