@@ -278,7 +278,7 @@ def _work_text(w):
     return " · ".join(parts) or t("nothing to do here")
 
 
-def submit(kind, badge=None, sid=None, method="QR", extra=None, ctx=None):
+def submit(kind, badge=None, sid=None, method="QR", extra=None, ctx=None, pend_id=None):
     """Send one crew action to the server (or to the device queue when offline)."""
     if ctx is None:
         ctx = {"operator": user["display_name"], "role": role, "device_id": dev_id, "stop_id": st.session_state.get(f"{K}_stop", SCHOOL_STOP),
@@ -296,11 +296,16 @@ def submit(kind, badge=None, sid=None, method="QR", extra=None, ctx=None):
             res["message"] += " · 📴 saved on device, will sync"
     else:
         res = E.process(run["id"], kind, ctx, badge_code=badge, student_id=sid)
-    st.session_state.pop(f"{K}_pending", None)
-    if res.get("needs"):
-        st.session_state[f"{K}_pending"] = {"kind": kind, "badge": badge, "sid": sid, "ctx": ctx, "needs": res["needs"], "allowed": res.get("allowed")}
-    elif "Over-capacity needs" in res["message"]:
-        st.session_state[f"{K}_pending"] = {"kind": kind, "badge": badge, "sid": sid, "ctx": ctx, "needs": "capacity"}
+    # several scans can wait for confirmation at the same time — a new scan never drops an unconfirmed one
+    pl = st.session_state.setdefault(f"{K}_pendings", [])
+    if pend_id is not None and not res.get("needs") and "Over-capacity needs" not in res["message"]:
+        pl[:] = [x_ for x_ in pl if x_["id"] != pend_id]
+    if res.get("needs") or "Over-capacity needs" in res["message"]:
+        sid_ = res.get("student_id") or sid
+        item = {"id": pend_id or str(uuid.uuid4()), "kind": kind, "badge": badge, "sid": sid, "ctx": ctx,
+                "needs": res.get("needs") or "capacity", "allowed": res.get("allowed"), "student_id": sid_,
+                "name": res.get("student_name") or (db.q1("SELECT name FROM students WHERE id=?", (sid_,)) or {}).get("name", "Student")}
+        pl[:] = [x_ for x_ in pl if not (sid_ and x_.get("student_id") == sid_)] + [item]
     st.session_state[f"{K}_last"] = (res["level"], res["message"])
 
 
@@ -380,33 +385,40 @@ if not is_driver:
                                       format_func=lambda a: ("⬆ " if a == t("Check In") else "⬇ ") + a) or t("Check In")
     kind = "CHECK_IN" if action == t("Check In") else "CHECK_OUT"
 
-    pend = st.session_state.get(f"{K}_pending")
-    if pend:
+    _pl = st.session_state.get(f"{K}_pendings", [])
+    if _pl:
+        st.markdown(f"<div class='warn'>⏳ <b>{len(_pl)} {t('waiting for confirmation')}</b> — "
+                    + t("the child is NOT checked out until you confirm. Confirm each card below.") + "</div>", unsafe_allow_html=True)
+    _stopname = {s_["id"]: s_["name"] for s_ in stops}
+    for pend in list(_pl):
+        pid = pend["id"]
         with st.container(border=True):
+            st.markdown(f"**{pend['name']}** · {'Check Out' if pend['kind'] == 'CHECK_OUT' else 'Check In'} at "
+                        f"{_stopname.get(pend['ctx'].get('stop_id'), t('School'))} · {t('scanned')} {pend['ctx']['captured_ts'][11:16]}")
             if pend["needs"] == "recipient":
-                st.markdown("**" + t("Handed to (authorized recipient)") + "**")
+                st.caption(t("Handed to (authorized recipient)"))
                 opts = [a["name"] for a in pend["allowed"] or []] + ["__NONE__"]
                 lab = {a["name"]: f"{a['name']} — {a['relation']} · {a['phone']}" for a in pend["allowed"] or []}
                 lab["__NONE__"] = "⛔ " + t("No approved recipient present")
-                pick = st.radio("Recipient", opts, format_func=lab.get, label_visibility="collapsed", key=f"{K}_rec")
-                if st.button(t("Confirm handover"), type="primary"):
-                    submit(pend["kind"], pend["badge"], pend["sid"], ctx=pend["ctx"], extra={"recipient": pick})
+                pick = st.radio("Recipient", opts, format_func=lab.get, label_visibility="collapsed", key=f"{K}_rec_{pid}")
+                if st.button("✅ " + t("Confirm handover"), type="primary", key=f"{K}_cf_{pid}", width="stretch"):
+                    submit(pend["kind"], pend["badge"], pend["sid"], ctx=pend["ctx"], extra={"recipient": pick}, pend_id=pid)
                     st.rerun()
             elif pend["needs"] == "receiver":
-                st.markdown("**" + t("Received by (school staff)") + "**")
+                st.caption(t("Received by (school staff)"))
                 rec = [r["name"] for r in db.q("SELECT name FROM staff WHERE role='receiving' ORDER BY name")]
-                pick = st.pills("Receiver", rec, default=rec[0] if rec else None, label_visibility="collapsed", key=f"{K}_rcv") or (rec[0] if rec else None)
-                if st.button(t("Confirm handover"), type="primary"):
-                    submit(pend["kind"], pend["badge"], pend["sid"], ctx=pend["ctx"], extra={"received_by": pick})
+                pick = st.pills("Receiver", rec, default=rec[0] if rec else None, label_visibility="collapsed", key=f"{K}_rcv_{pid}") or (rec[0] if rec else None)
+                if st.button("✅ " + t("Confirm handover"), type="primary", key=f"{K}_cf_{pid}", width="stretch"):
+                    submit(pend["kind"], pend["badge"], pend["sid"], ctx=pend["ctx"], extra={"received_by": pick}, pend_id=pid)
                     st.rerun()
             elif pend["needs"] == "capacity":
                 st.markdown("**Bus is full — supervisor override**")
-                why = st.text_input(t("Reason"), key=f"{K}_capwhy")
-                if st.button("Override and check in", disabled=not why.strip()):
-                    submit(pend["kind"], pend["badge"], pend["sid"], ctx=pend["ctx"], extra={"capacity_override": why.strip()})
+                why = st.text_input(t("Reason"), key=f"{K}_capwhy_{pid}")
+                if st.button("Override and check in", disabled=not why.strip(), key=f"{K}_cap_{pid}"):
+                    submit(pend["kind"], pend["badge"], pend["sid"], ctx=pend["ctx"], extra={"capacity_override": why.strip()}, pend_id=pid)
                     st.rerun()
-            if st.button("Cancel"):
-                st.session_state.pop(f"{K}_pending")
+            if st.button(t("Cancel this scan"), key=f"{K}_cx_{pid}"):
+                st.session_state[f"{K}_pendings"] = [x_ for x_ in _pl if x_["id"] != pid]
                 st.rerun()
 
     tab_cam, tab_type, tab_man, tab_photo = st.tabs(["📷 " + t("Scan badge with camera"), "⌨️ " + t("Badge reader / type code"),
@@ -443,7 +455,8 @@ if not is_driver:
         for s in allst:
             opts.setdefault(s["id"], f"{s['name']} ({s['code']}) — not on this list")
         sid = st.selectbox(t("Student"), list(opts), format_func=opts.get, index=None, placeholder="Search name…", key=f"{K}_mansid")
-        _why_opts = ["Badge forgotten", "Badge damaged / unreadable", "Camera / reader fault", "Paper roster entry"]
+        _why_opts = ["Badge forgotten", "Badge damaged / unreadable", "Camera / reader fault", "Paper roster entry",
+                     "Handover not confirmed — child already left the bus"]
         why = st.pills(t("Reason"), _why_opts, default=_why_opts[0], key=f"{K}_manwhy") or _why_opts[0]
         crew_names = [db.staff_name(run["supervisor_id"]), db.staff_name(run["caretaker_id"]), db.staff_name(run["driver_id"])]
         _ver_opts = [n for n in crew_names if n and n != user["display_name"]] or crew_names

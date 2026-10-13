@@ -104,7 +104,15 @@ for k in kids:
             if st.button(t("Send"), key=f"abb{k['id']}", type="primary"):
                 trip_no = None if scope == t("All trips") else int(scope.split()[1])
                 E.declare_absence(k["id"], d.isoformat(), trip_no, why, user["username"], "GUARDIAN")
-                st.session_state.pp_last = ("ok", f"{k['name']}: {t('Absence recorded. The crew will not wait for your child.')}")
+                _which = [n for n in trips_for if trip_no is None or n == trip_no]
+                _det = []
+                for n in _which:
+                    _m = E.manifest_for_student(k, d.isoformat(), n, None)
+                    if _m:
+                        _det.append(f"{_m['bus_no']} · Trip {n} ({'pickup' if _m['purpose'] == 'PICKUP' else 'drop-off'}, "
+                                    f"{TRIPS[n]['window'][0]}–{TRIPS[n]['window'][1]})")
+                st.session_state.pp_last = ("ok", f"{k['name']}: {t('Absence recorded. The crew will not wait for your child.')}"
+                                            + f"<br><b>{d:%a %d %b %Y}</b> — " + ("; ".join(_det) if _det else t("All trips")))
                 st.rerun()
         with a2.popover("✏️ " + t("Request a change"), width="stretch"):
             d = st.date_input(t("Date"), value=date.fromisoformat(today), min_value=date.fromisoformat(today), key=f"chd{k['id']}")

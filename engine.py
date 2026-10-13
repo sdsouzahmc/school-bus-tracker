@@ -407,6 +407,11 @@ def process(run_id, kind, ctx, badge_code=None, student_id=None, con=None, rnd=r
         if badge_code is not None:
             badge = q1("SELECT * FROM badges WHERE code=?", (badge_code.strip().upper(),), c)
             if not badge:
+                code_ = badge_code.strip().upper()
+                st_ = q1("SELECT name FROM students WHERE UPPER(code)=? OR UPPER(code)=?", (code_, "ST" + code_.zfill(3)), c)
+                if st_:
+                    return reject(f"'{badge_code}' is the student ID of {st_['name']}, not a badge code. Scan the badge, or use Manual entry "
+                                  "(reason + second crew member) if the badge is not available.")
                 return reject(f"Invalid badge: {badge_code}")
             if badge["status"] != "ACTIVE":
                 return reject(f"Badge {badge_code} was revoked ({badge['reason'] or 'replaced'}). Use the student's new badge.", badge["student_id"])
@@ -504,7 +509,8 @@ def process(run_id, kind, ctx, badge_code=None, student_id=None, con=None, rnd=r
                     return reject(f"{stu['name']} is a pickup — check out only at school with receiving staff.", student_id, line["id"])
                 rec_by = ctx.get("received_by")
                 if not rec_by:
-                    return {"ok": False, "level": "error", "message": "Select the receiving staff member at school.", "needs": "receiver"}
+                    return {"ok": False, "level": "warn", "message": f"{stu['name']}: select the receiving staff member and confirm.", "needs": "receiver",
+                            "student_id": student_id, "student_name": stu["name"]}
                 new_status = "COMPLETED" if line["purpose"] == "PICKUP" else "RETURNED"
                 handover = "SCHOOL_RECEIPT" if line["purpose"] == "PICKUP" else "RETURNED_TO_SCHOOL"
                 c.execute("""UPDATE manifest SET status=?, exit_ts=?, exit_lat=?, exit_lon=?, handover=?, received_by=? WHERE id=?""",
@@ -535,7 +541,8 @@ def process(run_id, kind, ctx, badge_code=None, student_id=None, con=None, rnd=r
                 return {"ok": False, "level": "error", "message": f"NOT RELEASED: no approved recipient for {stu['name']}. "
                         "Child stays on board — custody incident raised."}
             if recip is None:
-                return {"ok": False, "level": "error", "message": "Select who is receiving the child.", "needs": "recipient", "allowed": allowed}
+                return {"ok": False, "level": "warn", "message": f"{stu['name']}: select who is receiving the child and tap Confirm handover.",
+                        "needs": "recipient", "allowed": allowed, "student_id": student_id, "student_name": stu["name"]}
             match = next((a for a in allowed if a["name"] == recip), None)
             if not match:
                 return reject(f"{recip} is not an authorized recipient for {stu['name']} — not released.", student_id, line["id"])
